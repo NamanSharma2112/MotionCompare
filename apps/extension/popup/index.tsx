@@ -1,38 +1,27 @@
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { injectDialKitStyles, tokens } from "@motionlab/dialkit";
-import { injectDevtoolsStyles } from "@motionlab/devtools";
-import type {
-  ExtensionCommand,
-  ExtensionResponse,
-  ExtensionStatus,
-} from "../shared/messages";
+import { BrandMark, Button, Icon, StatusDot, UiRoot, injectUiStyles } from "@motionlab/ui";
+import type { ExtensionCommand, ExtensionResponse, ExtensionStatus } from "../shared/messages";
 
 function send(command: ExtensionCommand): Promise<ExtensionResponse> {
   return chrome.runtime.sendMessage(command) as Promise<ExtensionResponse>;
 }
 
 /**
- * Turn Chrome's wording into something a developer can act on.
- *
- * MotionLab asks for `activeTab` rather than access to every site, and Chrome
- * grants that only when the extension is invoked from its toolbar icon. Seeing
- * the raw "manifest must request permission" string here usually means the
- * popup was opened some other way.
+ * Chrome grants `activeTab` only when MotionLab is opened from its toolbar
+ * icon. Its raw wording ("manifest must request permission…") means nothing
+ * to a developer, so it is translated into what to do.
  */
 function explain(error: string): string {
   if (/host permissions|respective host|Cannot access contents/i.test(error)) {
-    return "No access to this tab yet. MotionLab only asks for the tab you are on, and Chrome grants that when you open it from the toolbar icon — click the MotionLab icon on this page and try again.";
+    return "Open MotionLab from its toolbar icon on this tab to give it access.";
   }
   return error;
 }
 
 /**
- * The popup.
- *
- * Activation, status and — when the page runs the MotionLab SDK — the list of
- * registered targets, so the developer can jump straight into native mode
- * instead of hunting for the right element.
+ * The popup does one thing: start MotionLab on this page. The product lives
+ * in the panel on the page itself.
  */
 function Popup() {
   const [status, setStatus] = useState<ExtensionStatus | null>(null);
@@ -48,112 +37,74 @@ function Popup() {
         setStatus(response.status);
         if (closeAfter) window.close();
       } else {
-        setError(response.error);
+        setError(explain(response.error));
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not reach the page.");
+      setError(explain(cause instanceof Error ? cause.message : "Could not reach the page."));
     } finally {
       setBusy(false);
     }
   }, []);
 
   useEffect(() => {
-    injectDialKitStyles();
-    injectDevtoolsStyles();
     void run({ type: "GET_STATUS" });
   }, [run]);
 
+  const line = error
+    ? error
+    : !status
+      ? "Checking this page…"
+      : status.sdk
+        ? `MotionLab SDK · ${status.nativeTargets.length} component${status.nativeTargets.length === 1 ? "" : "s"}`
+        : status.panelOpen
+          ? status.inspecting
+            ? `Inspecting ${status.inspecting}`
+            : "Panel open on this page"
+          : "Ready on this page";
+
   return (
-    <div
-      className="ml dk"
-      style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}
-    >
-      <div className="ml-brand">
-        <span className="ml-launcher-dot" aria-hidden="true" />
+    <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="mlui-brand">
+        <BrandMark />
         MotionLab
       </div>
-
-      {status?.sdk ? (
-        <>
-          <p className="dk-hint" style={{ lineHeight: 1.5 }}>
-            This page runs the MotionLab SDK. Open a registered component and compare the real
-            thing — no DOM guessing.
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {status.nativeTargets.length > 0 ? (
-              status.nativeTargets.map((target) => (
-                <button
-                  key={target.id}
-                  type="button"
-                  className="ml-target"
-                  disabled={busy}
-                  onClick={() =>
-                    void run({ type: "OPEN_NATIVE_TARGET", targetId: target.id }, true)
-                  }
-                >
-                  <span className="ml-target-dot" aria-hidden="true" />
-                  <span>{target.label}</span>
-                </button>
-              ))
-            ) : (
-              <span className="dk-hint">No targets registered on this page yet.</span>
-            )}
-          </div>
-          <hr style={{ border: 0, borderTop: `1px solid ${tokens.border}`, margin: 0 }} />
-        </>
-      ) : null}
-
-      <button
-        type="button"
-        className="dk-button dk-button-lg"
-        data-accent="true"
-        disabled={busy}
-        onClick={() => void run({ type: "START_SELECTION" }, true)}
-      >
-        Select element
-      </button>
-
-      {status?.experimentOpen ? (
-        <button
-          type="button"
-          className="dk-button"
-          disabled={busy}
-          onClick={() => void run({ type: "CLOSE_EXPERIMENT" })}
-        >
-          Close experiment{status.selectorLabel ? ` · ${status.selectorLabel}` : ""}
-        </button>
-      ) : null}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <span className="dk-label">Status</span>
-        <span className="dk-hint">
-          {error
-            ? explain(error)
-            : !status
-              ? "Checking page…"
-              : status.selecting
-                ? "Selecting — click an element on the page"
-                : status.experimentOpen
-                  ? `Comparing ${status.selectorLabel ?? "element"}`
-                  : status.sdk
-                    ? "Ready · MotionLab SDK detected"
-                    : "Ready · generic DOM mode"}
+      <div className="mlui-hstack" style={{ gap: 7, minHeight: 18 }}>
+        <StatusDot tone={error ? "warning" : status ? "success" : undefined} />
+        <span className="mlui-meta" style={{ lineHeight: 1.45 }}>
+          {line}
         </span>
       </div>
-
-      <p className="dk-hint" style={{ lineHeight: 1.5 }}>
-        MotionLab animates a copy of the element inside its own stage. Your page is not modified,
-        and closing the experiment leaves it exactly as it was.
-      </p>
+      <Button
+        variant="primary"
+        block
+        icon="inspect"
+        disabled={busy || Boolean(error)}
+        onClick={() => void run({ type: "START_INSPECT" }, true)}
+      >
+        Inspect component
+      </Button>
+      <button
+        type="button"
+        className="mlui-add"
+        style={{ margin: "-4px -6px 0", justifyContent: "space-between" }}
+        disabled={busy || Boolean(error)}
+        onClick={() => void run({ type: status?.panelOpen ? "CLOSE_PANEL" : "OPEN_PANEL" }, !status?.panelOpen)}
+      >
+        {status?.panelOpen ? "Close panel" : "Open panel"}
+        <Icon name="arrow" size={13} />
+      </button>
     </div>
   );
 }
 
+injectUiStyles();
 const container = document.getElementById("root");
 if (container) {
   createRoot(container).render(
     <StrictMode>
-      <Popup />
+      <UiRoot theme="system">
+        <Popup />
+      </UiRoot>
     </StrictMode>,
   );
 }

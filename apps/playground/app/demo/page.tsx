@@ -15,10 +15,7 @@ export default function DemoPage() {
     <MotionLabProvider>
       <div className="flex min-h-screen flex-col items-center bg-zinc-100 px-6 py-16 dark:bg-zinc-950">
         <div className="w-full max-w-xl">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
-            Your actual application
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             Checkout
           </h1>
           <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
@@ -31,13 +28,13 @@ export default function DemoPage() {
             to compare two motion configurations of this same component.
           </p>
 
-          <div className="mt-8">
+          <div className="mt-8 w-fit" id="checkout-card">
             <CheckoutCard />
           </div>
 
           <ol className="mt-10 space-y-1.5 text-xs text-zinc-500 dark:text-zinc-500">
-            <li>1. Open MotionLab · 2. Select Checkout Card · 3. Press Compare</li>
-            <li>4. Tune B&apos;s stiffness · 5. Replay · 6. Choose B · 7. Copy Winner</li>
+            <li>1. Open MotionLab · 2. Select Checkout Card · 3. Replay in place</li>
+            <li>4. Tune B&apos;s stiffness · 5. Compare · 6. Choose B · 7. Copy</li>
           </ol>
 
           <a

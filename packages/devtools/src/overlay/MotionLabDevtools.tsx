@@ -1,119 +1,181 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { injectDialKitStyles } from "@motionlab/dialkit";
+import { createInteraction, type MotionInteraction } from "@motionlab/core";
 import { useMotionLabContext } from "@motionlab/react";
-import { ReactComparison } from "../comparison/ReactComparison";
-import { TargetList } from "../target-list/TargetList";
-import { injectDevtoolsStyles } from "../styles";
+import { BrandMark, UiRoot, useResolvedTheme } from "@motionlab/ui";
+import { VariantErrorBoundary } from "../comparison/VariantErrorBoundary";
+import { cssPropertiesFor } from "../inspector/format";
+import { Inspector } from "../inspector/Inspector";
+import { useShadowContainer } from "../inspector/shadow";
+import { DEFAULT_SETTINGS, type InspectorHost, type InspectorSettings } from "../inspector/types";
+import { StageLayer } from "../stage/StageLayer";
 
 export interface MotionLabDevtoolsProps {
-  /** Start with the picker open. Handy while iterating on one component. */
+  /** Open the panel on load. Handy while iterating on one component. */
   defaultOpen?: boolean;
 }
 
+const SETTINGS_KEY = "motionlab:settings";
+
+function loadSettings(): InspectorSettings {
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return DEFAULT_SETTINGS;
+    const parsed = JSON.parse(raw) as Partial<InspectorSettings>;
+    return {
+      theme: parsed.theme === "light" || parsed.theme === "dark" ? parsed.theme : "system",
+      dock: parsed.dock === "right" ? "right" : "float",
+      position: {
+        top: Number(parsed.position?.top) || DEFAULT_SETTINGS.position.top,
+        right: Number(parsed.position?.right) || DEFAULT_SETTINGS.position.right,
+      },
+    };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+const PORTAL_CSS_ID = "motionlab-stage-portal-css";
+
+/** Portalled content inside a stage slot must stay clickable. */
+function injectStagePortalCss() {
+  if (document.getElementById(PORTAL_CSS_ID)) return;
+  const style = document.createElement("style");
+  style.id = PORTAL_CSS_ID;
+  style.textContent = "[data-motionlab-portal] > * { pointer-events: auto; }";
+  document.head.appendChild(style);
+}
+
 /**
- * The floating MotionLab launcher and the comparison overlay it opens.
+ * The in-app devtools: a small launcher and the MotionLab inspector.
  *
- * Renders `null` whenever MotionLab is not enabled, so a production build with
- * this mounted shows nothing and does nothing. Pair it with a dynamic import
- * if you also want it stripped from the bundle entirely.
- *
- * The overlay is portalled to `document.body` so it cannot be clipped by the
- * host app's layout — but it is still part of this React tree, which means the
- * component under test inherits the app's theme, design system, localization,
- * router and context exactly as it would in place.
+ * Renders nothing unless MotionLab is enabled. The panel lives in a shadow
+ * root so the app's CSS cannot restyle it; the component under test is
+ * rendered in the app's own DOM (through a portal, so it keeps the app's
+ * theme, router and context) and replayed where it appears on the page.
  */
 export function MotionLabDevtools({ defaultOpen = false }: MotionLabDevtoolsProps) {
   const context = useMotionLabContext();
-  const [pickerOpen, setPickerOpen] = useState(defaultOpen);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   const enabled = context?.enabled ?? false;
-  const openTargetId = context?.openTargetId ?? null;
+  const [open, setOpen] = useState(defaultOpen);
+  const [settings, setSettings] = useState<InspectorSettings>(DEFAULT_SETTINGS);
+  const container = useShadowContainer("data-motionlab-devtools", enabled);
+  const theme = useResolvedTheme(settings.theme);
 
-  // Styles go in only once MotionLab is actually on. A production page that
-  // mounts the devtools and never enables them should end up with nothing
-  // added to its document at all, not an unused stylesheet.
   useEffect(() => {
     if (!enabled) return;
-    injectDialKitStyles();
-    injectDevtoolsStyles();
+    setSettings(loadSettings());
+    injectStagePortalCss();
   }, [enabled]);
 
-  // Escape closes the picker when no comparison is open; the overlay handles
-  // its own Escape through the shared keyboard hook.
+  // Opening a target from anywhere — including the browser extension's
+  // native mode — brings the panel up.
+  const openTargetId = context?.openTargetId ?? null;
   useEffect(() => {
-    if (!enabled || !pickerOpen || openTargetId) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setPickerOpen(false);
+    if (openTargetId) setOpen(true);
+  }, [openTargetId]);
+
+  const onSettingsChange = useCallback((next: InspectorSettings) => {
+    setSettings(next);
+    try {
+      window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    } catch {
+      /* storage blocked: settings last for the session */
     }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [enabled, pickerOpen, openTargetId]);
+  }, []);
 
-  if (!context || !enabled || !mounted) return null;
+  const target = openTargetId ? context?.getTarget(openTargetId) : undefined;
+  const experiment = context?.experiment ?? null;
 
-  const { targets, openTarget, closeTarget, experiment, updateExperiment, getTarget } = context;
-  const activeTarget = openTargetId ? getTarget(openTargetId) : undefined;
+  const interactions = useMemo<MotionInteraction[]>(() => {
+    if (!target || !experiment) return [];
+    const base = createInteraction({
+      id: target.id,
+      label: target.interaction ?? "Enter",
+      trigger: "declared",
+      properties: cssPropertiesFor(experiment.keyframes),
+      keyframes: experiment.keyframes,
+      current: experiment.variantA.transition,
+      source: "react",
+      saved: experiment,
+    });
+    return [base];
+  }, [target, experiment]);
+
+  const anchorElement = useMemo(() => {
+    if (!target?.anchor || typeof document === "undefined") return null;
+    try {
+      return document.querySelector(target.anchor);
+    } catch {
+      return null;
+    }
+  }, [target]);
+
+  if (!context || !enabled || !container) return null;
+
+  const host: InspectorHost = {
+    mode: "react",
+    component: target
+      ? {
+          key: target.id,
+          name: target.label,
+          breadcrumb: [target.label],
+          detail: target.anchor ?? target.id,
+          mode: "react",
+        }
+      : null,
+    components: context.targets.map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      detail: entry.anchor ?? entry.id,
+    })),
+    onSelectComponent: (id) => context.openTarget(id),
+    onChangeComponent: () => context.closeTarget(),
+    interactions,
+    onInteractionsChange(next) {
+      const updated = next[0]?.experiment;
+      if (updated) context.updateExperiment(updated);
+    },
+    renderStage(stage) {
+      if (!target) return null;
+      return createPortal(
+        <StageLayer
+          {...stage}
+          theme={theme}
+          anchor={anchorElement}
+          interactive
+          renderContent={(variant, portalContainer) => (
+            // Called once per slot: A and B are separate instances with their
+            // own state, refs and effects, each isolated by its own boundary.
+            <VariantErrorBoundary variant={variant}>
+              {target.render({ variant, portalContainer, playing: stage.visible })}
+            </VariantErrorBoundary>
+          )}
+        />,
+        document.body,
+      );
+    },
+    settings,
+    onSettingsChange,
+    onClose() {
+      context.closeTarget();
+      setOpen(false);
+    },
+  };
 
   return createPortal(
-    <div className="ml dk">
-      {!openTargetId ? (
-        <>
-          <button
-            type="button"
-            className="ml-launcher"
-            onClick={() => setPickerOpen((open) => !open)}
-            aria-expanded={pickerOpen}
-          >
-            <span className="ml-launcher-dot" aria-hidden="true" />
-            MotionLab
-          </button>
-
-          {pickerOpen ? (
-            <div className="ml-picker" role="dialog" aria-label="MotionLab targets">
-              <div className="ml-picker-head">
-                <span className="ml-picker-title">Targets</span>
-                <span className="dk-hint">{targets.length}</span>
-                <button
-                  type="button"
-                  className="ml-close"
-                  onClick={() => setPickerOpen(false)}
-                  aria-label="Close target list"
-                >
-                  ×
-                </button>
-              </div>
-              <TargetList
-                targets={targets}
-                openTargetId={openTargetId}
-                onSelect={(id) => {
-                  openTarget(id);
-                  setPickerOpen(false);
-                }}
-              />
-            </div>
-          ) : null}
-        </>
-      ) : null}
-
-      {openTargetId && experiment && activeTarget ? (
-        <div className="ml-overlay" role="dialog" aria-modal="true" aria-label="MotionLab comparison">
-          <ReactComparison
-            experiment={experiment}
-            target={activeTarget}
-            onChange={updateExperiment}
-            onClose={closeTarget}
-          />
-        </div>
-      ) : null}
-    </div>,
-    document.body,
+    open ? (
+      <Inspector host={host} />
+    ) : (
+      <UiRoot theme={settings.theme}>
+        <button type="button" className="mlui-launcher" onClick={() => setOpen(true)} aria-label="Open MotionLab">
+          <BrandMark />
+          MotionLab
+        </button>
+      </UiRoot>
+    ),
+    container,
   );
 }

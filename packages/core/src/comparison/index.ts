@@ -36,12 +36,12 @@ export function createExperiment(options: CreateExperimentOptions = {}): Experim
     ...(options.label !== undefined ? { label: options.label } : {}),
     variantA: {
       id: "A",
-      name: options.variantA?.name ?? "Variant A",
+      name: options.variantA?.name ?? "Current",
       transition: normalizeTransition({ ...baseline }),
     },
     variantB: {
       id: "B",
-      name: options.variantB?.name ?? "Variant B",
+      name: options.variantB?.name ?? "Experiment",
       transition: normalizeTransition({ ...(options.variantB?.transition ?? baseline) }),
     },
     winner: null,

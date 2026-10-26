@@ -1,18 +1,23 @@
 {
   "name": "@motionlab/devtools",
   "version": "0.2.0",
-  "description": "MotionLab devtools — the launcher, overlay and shared A/B comparison UI.",
+  "description": "MotionLab devtools \u2014 the launcher, overlay and shared A/B comparison UI.",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "sideEffects": false,
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "dependencies": {
     "@motionlab/core": "0.2.0",
     "@motionlab/dialkit": "0.2.0",
-    "@motionlab/react": "0.2.0"
+    "@motionlab/react": "0.2.0",
+    "@motionlab/ui": "0.3.0"
   },
   "peerDependencies": {
     "react": ">=18",

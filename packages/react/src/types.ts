@@ -37,6 +37,14 @@ export interface MotionLabTargetDefinition {
   portalContainer?: HTMLElement | null;
   /** Width of each variant stage in pixels, when the component needs room. */
   stageWidth?: number;
+  /**
+   * A CSS selector for where this component appears on the page. When set,
+   * MotionLab replays over that element in place; otherwise it plays in the
+   * open part of the viewport.
+   */
+  anchor?: string;
+  /** What the declared motion is, e.g. "Enter" or "Closed → Open". */
+  interaction?: string;
 }
 
 export interface MotionLabContextValue {

@@ -17,3 +17,4 @@ export * from "./exporters/index";
 export * from "./serialization/index";
 export * from "./persistence/index";
 export * from "./bridge/index";
+export * from "./interactions/index";

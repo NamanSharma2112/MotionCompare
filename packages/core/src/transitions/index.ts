@@ -12,6 +12,7 @@ import { estimateSpringDuration, springProgressAt } from "./spring";
 
 export * from "./easing";
 export * from "./spring";
+export * from "./css";
 
 export const DEFAULT_SPRING: SpringTransition = {
   type: "spring",

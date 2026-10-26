@@ -1,24 +1,22 @@
+import { StrictMode, createRef } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { injectUiStyles } from "@motionlab/ui";
 import {
   isExtensionCommand,
   type ExtensionResponse,
   type ExtensionStatus,
 } from "../shared/messages";
-import { experimentForElement } from "./inspect";
+import { App, type AppHandle } from "./App";
 import { detectSdk, getNativeTargets, openNativeTarget } from "./nativeBridge";
-import { startSelection, type SelectionHandle } from "./selector";
-import { mountStage, type MountedStage } from "./stage";
 
 /**
  * The MotionLab content script.
  *
- * Injected on demand when the developer opens the popup. It can select an
- * element, inspect its motion, and open a comparison over the page — or, when
- * the page runs the MotionLab SDK, step aside and let the SDK's own devtools
- * handle the target natively.
- *
- * Everything it adds to the page is removable, and the page's own elements are
- * never modified: the selector draws its own overlay, and the comparison runs
- * on clones inside a shadow root.
+ * Injected on demand when the developer opens the popup. Everything MotionLab
+ * draws lives in one shadow root on one host element; closing the panel
+ * unmounts it and removes that element, which is the entire cleanup — the
+ * page's own elements are never modified, apart from the selected one being
+ * hidden while its stand-in replays, which is restored when playback stops.
  */
 
 declare global {
@@ -27,68 +25,68 @@ declare global {
   }
 }
 
-// The background script injects on demand and may do so more than once.
 if (!window.__MOTIONLAB_CONTENT__) {
   window.__MOTIONLAB_CONTENT__ = true;
   install();
 }
 
 function install(): void {
-  let selection: SelectionHandle | null = null;
-  let stage: MountedStage | null = null;
-  let selectorLabel: string | undefined;
-  let sdk = false;
-  let nativeTargets: Awaited<ReturnType<typeof getNativeTargets>> = [];
+  let mounted: { root: Root; host: HTMLElement; handle: React.RefObject<AppHandle | null> } | null = null;
 
-  function status(): ExtensionStatus {
+  function mount(): React.RefObject<AppHandle | null> {
+    if (mounted) return mounted.handle;
+    const host = document.createElement("div");
+    host.setAttribute("data-motionlab-extension", "");
+    host.style.cssText = "all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483000";
+    const shadow = host.attachShadow({ mode: "open" });
+    injectUiStyles(shadow);
+    const uiMount = document.createElement("div");
+    // The stage sits outside MotionLab's typography so the clone renders with
+    // only its own (inlined) styles.
+    const stageMount = document.createElement("div");
+    shadow.append(stageMount, uiMount);
+    document.documentElement.appendChild(host);
+
+    const handle = createRef<AppHandle>();
+    const root = createRoot(uiMount);
+    root.render(
+      <StrictMode>
+        <App handleRef={handle} shadowHost={host} stageMount={stageMount} onClose={unmount} />
+      </StrictMode>,
+    );
+    mounted = { root, host, handle };
+    return handle;
+  }
+
+  function unmount(): void {
+    const current = mounted;
+    mounted = null;
+    if (!current) return;
+    // Let the closing click finish before tearing the tree down.
+    queueMicrotask(() => {
+      current.root.unmount();
+      current.host.remove();
+    });
+  }
+
+  async function status(): Promise<ExtensionStatus> {
+    const live = mounted?.handle.current?.status();
+    if (live) return live;
+    const sdk = await detectSdk();
     return {
       sdk,
-      nativeTargets,
-      selecting: selection !== null,
-      experimentOpen: stage !== null,
-      ...(selectorLabel ? { selectorLabel } : {}),
+      nativeTargets: sdk ? await getNativeTargets() : [],
+      panelOpen: false,
+      picking: false,
     };
   }
 
-  async function refreshSdk(): Promise<void> {
-    sdk = await detectSdk();
-    nativeTargets = sdk ? await getNativeTargets() : [];
-  }
-
-  function closeStage(): void {
-    stage?.close();
-    stage = null;
-    selectorLabel = undefined;
-  }
-
-  function cancelSelection(): void {
-    selection?.cancel();
-    selection = null;
-  }
-
-  function beginSelection(): void {
-    cancelSelection();
-    closeStage();
-
-    selection = startSelection({
-      onSelect(element) {
-        selection = null;
-        const { experiment, label } = experimentForElement(element);
-        selectorLabel = label;
-        stage = mountStage({
-          experiment,
-          element,
-          selectorLabel: label,
-          onClosed() {
-            stage = null;
-            selectorLabel = undefined;
-          },
-        });
-      },
-      onCancel() {
-        selection = null;
-      },
-    });
+  /** Wait a frame or two for a freshly mounted panel to expose its handle. */
+  async function ready(handle: React.RefObject<AppHandle | null>): Promise<AppHandle | null> {
+    for (let attempt = 0; attempt < 20 && !handle.current; attempt += 1) {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    }
+    return handle.current;
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -102,28 +100,22 @@ function install(): void {
         switch (message.type) {
           case "PING":
           case "GET_STATUS":
-            await refreshSdk();
             break;
-
-          case "START_SELECTION":
-            beginSelection();
+          case "OPEN_PANEL":
+            await ready(mount());
             break;
-
-          case "CANCEL_SELECTION":
-            cancelSelection();
+          case "START_INSPECT":
+            (await ready(mount()))?.startInspect();
             break;
-
-          case "CLOSE_EXPERIMENT":
-            closeStage();
+          case "CLOSE_PANEL":
+            unmount();
             break;
-
           case "OPEN_NATIVE_TARGET":
-            // Native mode: the page's own devtools open the real component.
-            // MotionLab does not clone or guess when it does not have to.
             openNativeTarget(message.targetId);
+            unmount();
             break;
         }
-        sendResponse({ ok: true, status: status() } satisfies ExtensionResponse);
+        sendResponse({ ok: true, status: await status() } satisfies ExtensionResponse);
       } catch (error) {
         sendResponse({
           ok: false,
@@ -135,9 +127,5 @@ function install(): void {
     return true;
   });
 
-  // Leave nothing behind if the page navigates away mid-experiment.
-  window.addEventListener("pagehide", () => {
-    cancelSelection();
-    closeStage();
-  });
+  window.addEventListener("pagehide", unmount);
 }

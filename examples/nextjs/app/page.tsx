@@ -34,7 +34,9 @@ export default function Page() {
           </p>
         </div>
 
-        <CheckoutCard />
+        <div id="checkout-card">
+          <CheckoutCard />
+        </div>
       </main>
 
       <MotionLabTargets />

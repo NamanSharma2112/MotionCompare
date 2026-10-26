@@ -1,8 +1,8 @@
 {
   "name": "@motionlab/extension",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "MotionLab for Chromium — the same comparison engine, on any website.",
+  "description": "MotionLab for Chromium \u2014 the same comparison engine, on any website.",
   "scripts": {
     "build": "node build.mjs",
     "dev": "node build.mjs --watch"
@@ -10,8 +10,8 @@
   "dependencies": {
     "@motionlab/core": "0.2.0",
     "@motionlab/devtools": "0.2.0",
-    "@motionlab/dialkit": "0.2.0",
     "@motionlab/react": "0.2.0",
+    "@motionlab/ui": "0.3.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   }

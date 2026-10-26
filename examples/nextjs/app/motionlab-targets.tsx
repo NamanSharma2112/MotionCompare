@@ -21,6 +21,7 @@ export function MotionLabTargets() {
       from={{ opacity: 0, y: 20, scale: 0.96 }}
       to={{ opacity: 1, y: 0, scale: 1 }}
       stageWidth={260}
+      anchor="#checkout-card"
     />
   );
 }

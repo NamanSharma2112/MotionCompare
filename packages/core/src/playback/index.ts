@@ -1,8 +1,4 @@
-import {
-  isTransitionSettled,
-  transitionProgressAt,
-  transitionTotalDuration,
-} from "../transitions/index";
+import { transitionProgressAt, transitionTotalDuration } from "../transitions/index";
 import type { PlaybackState, TransitionConfig, VariantId } from "../types/index";
 
 /**
@@ -16,24 +12,70 @@ export interface Scheduler {
   cancelFrame(handle: unknown): void;
 }
 
+export interface PlaybackFrameInfo {
+  /** Milliseconds on the shared clock since this replay started, speed applied. */
+  elapsed: number;
+  /** Milliseconds since *this* track started (its offset removed). */
+  local: number;
+  settled: boolean;
+}
+
 export interface PlaybackTrack {
   variant: VariantId;
   transition: TransitionConfig;
+  /**
+   * Milliseconds on the shared clock before this track begins. Used to play
+   * A then B in the same place; still one clock, never a second timer.
+   */
+  offset?: number;
   /** Called with eased progress every frame. Progress may exceed 1 on a bouncy spring. */
-  onFrame(progress: number, info: { elapsed: number; settled: boolean }): void;
+  onFrame(progress: number, info: PlaybackFrameInfo): void;
   onSettled?(): void;
+}
+
+export interface PlaybackSnapshot {
+  state: PlaybackState;
+  paused: boolean;
+  speed: number;
+  loop: boolean;
 }
 
 export interface PlaybackController {
   getState(): PlaybackState;
+  getSnapshot(): PlaybackSnapshot;
   /** Register the tracks taking part in the next comparison. */
   setTracks(tracks: PlaybackTrack[]): void;
-  /** Reset both variants to their start state, then play them from one clock. */
+  /** Reset every track to its start state, then play them from one clock. */
   replayComparison(): void;
-  /** Stop playing and return both variants to their start state. */
+  /** Stop playing and return every track to its start state. */
   resetComparison(): void;
+  /**
+   * Stop playing and show every track at rest. What a held comparison shows
+   * between replays: an entrance's start pose is often invisible.
+   */
+  settleComparison(): void;
+  /** Freeze on the current frame. */
+  pause(): void;
+  resume(): void;
+  /** Slow motion: 1 is real time, 0.25 is four times slower. Safe mid-play. */
+  setSpeed(speed: number): void;
+  /** Replay continuously, holding briefly on the settled frame between runs. */
+  setLoop(loop: boolean): void;
+  /** Total length of the current comparison in clock milliseconds. */
+  getTotalDuration(): number;
   subscribe(listener: (state: PlaybackState) => void): () => void;
+  /** Every change to state, pause, speed or loop. */
+  subscribeSnapshot(listener: (snapshot: PlaybackSnapshot) => void): () => void;
+  /** Every frame, for playheads. Kept off React state on purpose. */
+  subscribeFrame(listener: (elapsed: number, total: number) => void): () => void;
   dispose(): void;
+}
+
+export interface PlaybackOptions {
+  speed?: number;
+  loop?: boolean;
+  /** Real-time milliseconds to hold the settled frame before a loop restarts. */
+  loopDelay?: number;
 }
 
 export function createRafScheduler(): Scheduler {
@@ -92,70 +134,148 @@ export function createManualScheduler(startTime = 0): Scheduler & {
   };
 }
 
+const MIN_SPEED = 0.05;
+const MAX_SPEED = 4;
+
 /**
  * The shared synchronized playback engine.
  *
- * Both variants are sampled from a single `t0` captured on the first animation
+ * Every track is sampled from a single `t0` captured on the first animation
  * frame of a replay. There is deliberately no `setTimeout` per variant and no
  * second animation loop: a per-variant timer is exactly how an A/B comparison
  * starts lying to you, because the two sides drift by a frame or more and the
  * difference you are judging is no longer only the transition.
  *
- * Per-variant `delay` is honoured as an offset inside that one clock.
+ * Delay, per-track offset, slow motion, freeze and looping are all expressed
+ * as arithmetic on that one clock.
  */
 export function createPlaybackController(
   scheduler: Scheduler = createRafScheduler(),
+  options: PlaybackOptions = {},
 ): PlaybackController {
   let tracks: PlaybackTrack[] = [];
   let state: PlaybackState = "idle";
+  let paused = false;
+  let speed = clampSpeed(options.speed ?? 1);
+  let loop = options.loop ?? false;
+  const loopDelay = options.loopDelay ?? 700;
+
   let frameHandle: unknown = null;
+  /** Real-time origin of the clock, rebased whenever speed changes. */
   let startTime: number | null = null;
+  let pausedElapsed = 0;
+  /** The clock position last drawn, so a track joining late is drawn there too. */
+  let lastElapsed = 0;
+  /** Real time at which a loop hold ends, while holding. */
+  let holdUntil: number | null = null;
   let disposed = false;
+
   const listeners = new Set<(state: PlaybackState) => void>();
-  const settledTracks = new Set<VariantId>();
+  const snapshotListeners = new Set<(snapshot: PlaybackSnapshot) => void>();
+  const frameListeners = new Set<(elapsed: number, total: number) => void>();
+  const settledTracks = new Set<PlaybackTrack>();
+
+  function clampSpeed(value: number) {
+    return Math.min(MAX_SPEED, Math.max(MIN_SPEED, Number.isFinite(value) ? value : 1));
+  }
+
+  function snapshot(): PlaybackSnapshot {
+    return { state, paused, speed, loop };
+  }
+
+  function notifySnapshot() {
+    const current = snapshot();
+    for (const listener of snapshotListeners) listener(current);
+  }
 
   function setState(next: PlaybackState) {
     if (state === next) return;
     state = next;
     for (const listener of listeners) listener(state);
+    notifySnapshot();
+  }
+
+  function totalDuration() {
+    return tracks.reduce(
+      (longest, track) =>
+        Math.max(longest, (track.offset ?? 0) + transitionTotalDuration(track.transition)),
+      0,
+    );
+  }
+
+  function drawTrack(track: PlaybackTrack, elapsed: number) {
+    const local = elapsed - (track.offset ?? 0);
+    const settled = local >= transitionTotalDuration(track.transition);
+    const progress = local <= 0 ? 0 : transitionProgressAt(track.transition, local);
+    track.onFrame(settled ? 1 : progress, { elapsed, local, settled });
   }
 
   function emitAt(elapsed: number) {
+    lastElapsed = elapsed;
     for (const track of tracks) {
-      const settled = isTransitionSettled(track.transition, elapsed);
-      const progress = transitionProgressAt(track.transition, elapsed);
-      track.onFrame(settled ? 1 : progress, { elapsed, settled });
-      if (settled && !settledTracks.has(track.variant)) {
-        settledTracks.add(track.variant);
+      const local = elapsed - (track.offset ?? 0);
+      const settled = local >= transitionTotalDuration(track.transition);
+      const progress = local <= 0 ? 0 : transitionProgressAt(track.transition, local);
+      track.onFrame(settled ? 1 : progress, { elapsed, local, settled });
+      if (settled && !settledTracks.has(track)) {
+        settledTracks.add(track);
         track.onSettled?.();
       }
     }
+    const total = totalDuration();
+    for (const listener of frameListeners) listener(Math.min(elapsed, total), total);
   }
 
-  function stopLoop() {
+  function snapToStart() {
+    lastElapsed = 0;
+    settledTracks.clear();
+    for (const track of tracks) {
+      track.onFrame(0, { elapsed: 0, local: -(track.offset ?? 0), settled: false });
+    }
+    const total = totalDuration();
+    for (const listener of frameListeners) listener(0, total);
+  }
+
+  function cancelFrame() {
     if (frameHandle !== null) {
       scheduler.cancelFrame(frameHandle);
       frameHandle = null;
     }
+  }
+
+  function stopLoop() {
+    cancelFrame();
     startTime = null;
+    holdUntil = null;
   }
 
   function tick(frameTime: number) {
     frameHandle = null;
-    if (disposed) return;
+    if (disposed || paused) return;
 
-    // The first frame of the replay defines t0 for every track at once.
+    if (holdUntil !== null) {
+      if (frameTime < holdUntil) {
+        frameHandle = scheduler.requestFrame(tick);
+        return;
+      }
+      // The hold is over: restart from a fresh t0 on this frame.
+      holdUntil = null;
+      startTime = null;
+      snapToStart();
+    }
+
+    // The first frame of a run defines t0 for every track at once.
     if (startTime === null) startTime = frameTime;
-    const elapsed = frameTime - startTime;
+    const elapsed = (frameTime - startTime) * speed;
 
     emitAt(elapsed);
 
-    const total = tracks.reduce(
-      (longest, track) => Math.max(longest, transitionTotalDuration(track.transition)),
-      0,
-    );
-
-    if (elapsed >= total) {
+    if (elapsed >= totalDuration()) {
+      if (loop) {
+        holdUntil = frameTime + loopDelay;
+        frameHandle = scheduler.requestFrame(tick);
+        return;
+      }
       stopLoop();
       setState("idle");
       return;
@@ -166,32 +286,86 @@ export function createPlaybackController(
 
   return {
     getState: () => state,
+    getSnapshot: snapshot,
 
     setTracks(next) {
+      const joined = next.filter((track) => !tracks.includes(track));
       tracks = next;
+      // A track that joins mid-comparison (a stage remounting, a variant
+      // added) is drawn at the clock's current frame rather than left at
+      // whatever pose it mounted in.
+      for (const track of joined) drawTrack(track, lastElapsed);
     },
 
     replayComparison() {
       if (disposed || tracks.length === 0) return;
       stopLoop();
-      settledTracks.clear();
-      // Snap both sides back to progress 0 before the clock starts, so neither
-      // variant animates out of a half-finished pose.
-      for (const track of tracks) {
-        track.onFrame(0, { elapsed: 0, settled: false });
-      }
+      paused = false;
+      pausedElapsed = 0;
+      // Snap every track back to progress 0 before the clock starts, so
+      // nothing animates out of a half-finished pose.
+      snapToStart();
       setState("playing");
+      notifySnapshot();
       frameHandle = scheduler.requestFrame(tick);
     },
 
     resetComparison() {
       stopLoop();
-      settledTracks.clear();
-      for (const track of tracks) {
-        track.onFrame(0, { elapsed: 0, settled: false });
-      }
+      paused = false;
+      pausedElapsed = 0;
+      snapToStart();
       setState("idle");
+      notifySnapshot();
     },
+
+    settleComparison() {
+      stopLoop();
+      paused = false;
+      pausedElapsed = 0;
+      settledTracks.clear();
+      emitAt(totalDuration());
+      setState("idle");
+      notifySnapshot();
+    },
+
+    pause() {
+      if (state !== "playing" || paused) return;
+      pausedElapsed = startTime === null ? 0 : (scheduler.now() - startTime) * speed;
+      cancelFrame();
+      paused = true;
+      notifySnapshot();
+    },
+
+    resume() {
+      if (!paused) return;
+      paused = false;
+      startTime = scheduler.now() - pausedElapsed / speed;
+      notifySnapshot();
+      if (state === "playing") frameHandle = scheduler.requestFrame(tick);
+    },
+
+    setSpeed(next) {
+      const clamped = clampSpeed(next);
+      if (clamped === speed) return;
+      // Rebase the origin so the current frame stays where it is and only
+      // the rate of time changes — a speed change must never jump.
+      if (startTime !== null && !paused) {
+        const now = scheduler.now();
+        const elapsed = (now - startTime) * speed;
+        startTime = now - elapsed / clamped;
+      }
+      speed = clamped;
+      notifySnapshot();
+    },
+
+    setLoop(next) {
+      if (loop === next) return;
+      loop = next;
+      notifySnapshot();
+    },
+
+    getTotalDuration: totalDuration,
 
     subscribe(listener) {
       listeners.add(listener);
@@ -200,10 +374,26 @@ export function createPlaybackController(
       };
     },
 
+    subscribeSnapshot(listener) {
+      snapshotListeners.add(listener);
+      return () => {
+        snapshotListeners.delete(listener);
+      };
+    },
+
+    subscribeFrame(listener) {
+      frameListeners.add(listener);
+      return () => {
+        frameListeners.delete(listener);
+      };
+    },
+
     dispose() {
       disposed = true;
       stopLoop();
       listeners.clear();
+      snapshotListeners.clear();
+      frameListeners.clear();
       tracks = [];
     },
   };

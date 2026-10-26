@@ -11,7 +11,6 @@ import {
 import {
   createExperiment,
   createExperimentStorage,
-  deserializeExperiment,
   setVariantTransition,
   targetStorageKey,
   type Experiment,

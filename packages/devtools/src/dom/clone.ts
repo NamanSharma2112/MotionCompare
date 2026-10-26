@@ -26,7 +26,8 @@ const COPIED_PROPERTIES = [
   "justify-content", "align-items", "align-self", "align-content", "gap",
   "grid-template-columns", "grid-template-rows", "grid-column", "grid-row",
   "font-family", "font-size", "font-weight", "font-style", "font-variant-numeric",
-  "line-height", "letter-spacing", "text-align", "text-transform", "text-decoration",
+  "line-height", "letter-spacing", "text-align", "text-transform",
+  "text-decoration-line", "text-decoration-color", "text-decoration-style",
   "text-overflow", "white-space", "word-break", "vertical-align",
   "color", "background-color", "background-image", "background-size",
   "background-position", "background-repeat", "background-clip",
@@ -50,35 +51,14 @@ function copyComputedStyles(source: Element, target: HTMLElement): void {
   const declarations: string[] = [];
   for (const property of COPIED_PROPERTIES) {
     const value = computed.getPropertyValue(property);
-    if (value && value !== "none" && value !== "auto" && value !== "normal") {
-      declarations.push(`${property}:${value}`);
-    }
+    // Copy "none", "auto" and "normal" too. Inside the shadow root the
+    // browser's own defaults apply again — an <a> is underlined, a <button>
+    // has a border — so a value the page reset has to be stated explicitly.
+    if (value) declarations.push(`${property}:${value}`);
   }
   target.setAttribute("style", declarations.join(";"));
 }
 
-/**
- * A readable description of what was selected, in the shape a developer would
- * recognize from their own markup: `div.checkout-card`.
- */
-export function describeElement(element: Element): string {
-  const tag = element.tagName.toLowerCase();
-  const id = element.id ? `#${element.id}` : "";
-  const classes = Array.from(element.classList)
-    .filter((name) => !name.startsWith("motionlab"))
-    .slice(0, 2)
-    .map((name) => `.${name}`)
-    .join("");
-  return `${tag}${id}${classes}` || tag;
-}
-
-/**
- * Deep-clone an element for the stage, with its computed appearance inlined.
- *
- * Returns null rather than throwing when the subtree is too large or cloning
- * fails, so the caller can show "Unable to create preview" and leave the page
- * untouched.
- */
 export function cloneForStage(element: Element): HTMLElement | null {
   try {
     if (countNodes(element) > MAX_NODES) return null;
@@ -112,7 +92,8 @@ export function cloneForStage(element: Element): HTMLElement | null {
 
 function prepare(clone: HTMLElement): HTMLElement {
   // The stage positions the clone itself; a page element that was fixed or
-  // absolutely positioned would otherwise fly out of the frame.
+  // absolutely positioned would otherwise fly out of the frame. Its own
+  // transform and opacity are cleared too: those are what MotionLab drives.
   clone.style.setProperty("position", "relative");
   clone.style.setProperty("top", "auto");
   clone.style.setProperty("left", "auto");
@@ -120,7 +101,13 @@ function prepare(clone: HTMLElement): HTMLElement {
   clone.style.setProperty("bottom", "auto");
   clone.style.setProperty("margin", "0");
   clone.style.setProperty("transform", "none");
+  clone.style.setProperty("translate", "none");
+  clone.style.setProperty("scale", "none");
+  clone.style.setProperty("rotate", "none");
   clone.style.setProperty("opacity", "1");
+  clone.style.setProperty("transition", "none");
+  clone.style.setProperty("animation", "none");
+  clone.style.setProperty("pointer-events", "none");
   clone.removeAttribute("id");
   clone.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
   return clone;

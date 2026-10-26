@@ -6,6 +6,7 @@
       "@motionlab/core": ["./packages/core/src/index.ts"],
       "@motionlab/core/*": ["./packages/core/src/*"],
       "@motionlab/dialkit": ["./packages/dialkit/src/index.ts"],
+      "@motionlab/ui": ["./packages/ui/src/index.ts"],
       "@motionlab/react": ["./packages/react/src/index.ts"],
       "@motionlab/devtools": ["./packages/devtools/src/index.ts"],
       "motionlab": ["./packages/motionlab/src/index.ts"]

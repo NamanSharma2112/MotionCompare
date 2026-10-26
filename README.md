@@ -46,18 +46,20 @@ motionlab/
 ├── packages/
 │   ├── core/                  comparison · playback · transitions · presets
 │   │                          exporters · serialization · persistence · bridge · types
-│   ├── dialkit/               the low-level parameter, spring, easing and timeline controls
+│   ├── ui/                    design system: tokens + primitives (Base UI, cmdk, lucide)
+│   ├── dialkit/               the playground's tuning controls
 │   ├── react/                 provider · target · animator · hooks
-│   ├── devtools/              overlay · controls · target-list · comparison
+│   ├── devtools/              inspector panel · in-place stage · DOM picker & recorder
 │   └── motionlab/             the umbrella package developers install
 └── examples/
     └── nextjs/                a real Next.js app with the SDK installed
 ```
 
-**MotionLab** provides selection, comparison, workflow, experiment and export.
-**DialKit** provides the parameter controls, spring controls, easing controls, physics
-readouts and timeline. The playground, the in-app devtools and the extension all render
-the same comparison shell over the same core, which is why they feel like one product.
+The extension and the in-app devtools render the **same inspector panel**
+(`packages/devtools/src/inspector`) on the same primitives (`packages/ui`) over the same
+core. The playground still uses the earlier comparison layout; moving it onto
+`packages/ui` is the next step. Visual decisions are recorded in [DESIGN.md](DESIGN.md),
+product truth in [PRODUCT.md](PRODUCT.md).
 
 ---
 
@@ -104,6 +106,19 @@ Register the components worth tuning:
 
 That's the whole integration. `MotionLabTarget` renders **nothing** — it registers the
 component so the devtools can open it. The provider adds no markup.
+
+Two optional props make the replay feel native:
+
+```tsx
+<MotionLabTarget
+  id="checkout-card"
+  anchor="#checkout-card"      // where it lives on the page: replays happen right there
+  interaction="Enter"           // what the declared motion is called
+  ...
+/>
+```
+
+Without `anchor`, the component plays in the open part of the viewport beside the panel.
 
 ### Real component isolation
 
@@ -207,51 +222,37 @@ npm run build:extension
 
 Load `apps/extension/dist` at `chrome://extensions` → *Load unpacked*. Chromium only.
 
-Click the MotionLab icon on any page:
+**Use it:** click the MotionLab toolbar icon on any page → **Inspect component** → click
+an element (↑ selects its parent, Esc cancels). The inspector panel opens on the page:
 
 ```
-Extension
-    ↓
-Is the MotionLab SDK detected?
-    │
-   YES ─────────→ Native mode: the page's registered targets,
-    │             compared as real React components
-   NO
-    ↓
-Generic DOM mode: select an element, MotionLab clones it
+Select → Capture interaction → use the component normally → Captured
+       → Tune B (dials replay on release) → Compare → Choose B → Copy
 ```
 
-**Native mode** needs no DOM guessing. The content script speaks a validated,
-JSON-only protocol to the SDK over `postMessage`, asks for the registered targets, and
-has the page's own devtools open the real component.
+- **Capture** records the first burst of motion the component performs. It reads
+  `getAnimations()` every frame (CSS transitions, CSS animations, Web Animations API) and
+  a MutationObserver for state (`aria-expanded`, `data-state`, `open`, nodes entering), so
+  an interaction is named the way its author thinks of it: "Closed → Open". A starts as
+  what the page does today; B starts as the same pace re-expressed as a spring.
+- **Replay happens in place.** A styled clone plays exactly over the real element, which
+  is hidden for the duration and restored the instant playback stops. In Compare, B sits
+  beside it (or plays after A in the same spot with Sync off).
+- **Freeze, loop and slow motion** (½×, ¼×) run on the same single clock as everything else.
+- **⌘K / Ctrl K** opens commands. Space replays, A/B choose, S swaps, Esc goes back or closes.
+- The panel floats (drag its header) or docks right; light, dark or system theme.
 
-**Generic DOM mode** reads what the page actually declares — `transform`, `opacity`,
-`transition-duration`, `transition-timing-function`, `animation-duration`,
-`animation-timing-function`, and the Web Animations API where it is exposed. When it
-finds a transition, variant A starts as *what the page does today*. MotionLab does not
-try to understand arbitrary JavaScript animation libraries, and does not pretend to.
+If the page runs the MotionLab SDK, the panel lists its registered components and hands
+them to the page's own devtools — real React instances, no DOM guessing.
 
 ### What it does to your page
 
-Nothing permanent, and as little as possible while running:
-
-- The element you select is **never modified**. The hover highlight is a separate
-  overlay; your elements get no outline, class or inline style.
-- The comparison runs on **clones**, inside a shadow root, so neither page CSS nor
-  MotionLab's CSS reaches the other.
-- Scripts, iframes and embeds are stripped from the clone. MotionLab previews
-  appearance and motion; it does not run the site's code.
-- Closing removes one element. That is the whole of the cleanup.
-
-The extension requests `activeTab` rather than access to every site, so it has no
-standing access to anything: nothing is injected until you open the popup on the tab
-you are looking at. There is no `eval`, no arbitrary script injection, and every message
-crossing the page boundary is validated field by field.
-
-> Because of `activeTab`, open the popup from the **toolbar icon**. Chrome grants access
-> to the current tab only when the extension is invoked that way.
-
----
+- The element you select is never modified, except `visibility` while its stand-in
+  replays, restored exactly (including a pre-existing inline value) when playback stops.
+- Clones live in a shadow root with scripts, iframes and embeds stripped.
+- Settings and experiments go to `chrome.storage.local`, never the site's storage.
+- Closing removes the single host element; verified byte-identical `body` afterwards.
+- `activeTab` only: no standing access to any site, so open it from the **toolbar icon**.
 
 ## The comparison
 
@@ -325,7 +326,7 @@ motionlab:playground:<component>      playground
 
 Built and verified: the shared core, DialKit, the React SDK, the in-app devtools, the
 playground, the Chromium extension (both modes), the example app, production-preview
-gating, and 38 tests across the engine and the enablement rules.
+gating, and 51 tests across the engine and the enablement rules.
 
 Deliberately **not** built yet, and not blocked by anything here: the AI motion
 assistant, automatic source-code patching, VS Code and Figma integration, motion history,

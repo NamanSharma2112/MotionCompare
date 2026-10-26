@@ -18,6 +18,10 @@ export interface MotionLabTargetProps {
   transition?: TransitionConfig;
   portalContainer?: HTMLElement | null;
   stageWidth?: number;
+  /** Where the component lives on the page, so replays happen in place. */
+  anchor?: string;
+  /** A name for the declared motion. Defaults to "Enter". */
+  interaction?: string;
   /**
    * Also render the component inline, where the target sits in the tree.
    * Off by default: registering a target is about making it *testable*, not
@@ -42,6 +46,8 @@ export function MotionLabTarget({
   transition,
   portalContainer,
   stageWidth,
+  anchor,
+  interaction,
   renderInPlace = false,
 }: MotionLabTargetProps): ReactNode {
   const context = useMotionLabContext();
@@ -86,6 +92,8 @@ export function MotionLabTarget({
       ...(currentTransition ? { transition: currentTransition } : {}),
       ...(portalContainer !== undefined ? { portalContainer } : {}),
       ...(stageWidth !== undefined ? { stageWidth } : {}),
+      ...(anchor ? { anchor } : {}),
+      ...(interaction ? { interaction } : {}),
     });
     return () => unregisterTarget(id);
   }, [
@@ -99,6 +107,8 @@ export function MotionLabTarget({
     transitionKey,
     portalContainer,
     stageWidth,
+    anchor,
+    interaction,
   ]);
 
   if (!renderInPlace) return null;
