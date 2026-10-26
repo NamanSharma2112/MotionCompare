@@ -2,7 +2,7 @@
   "name": "@motionlab/playground",
   "version": "0.2.0",
   "private": true,
-  "description": "The MotionLab playground — the V1 surface, running on the shared core.",
+  "description": "The MotionLab playground \u2014 the V1 surface, running on the shared core.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -15,7 +15,8 @@
     "@motionlab/react": "0.2.0",
     "next": "16.4.3",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "motionlab": "0.2.0"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",

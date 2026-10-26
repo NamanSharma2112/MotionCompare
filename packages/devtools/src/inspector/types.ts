@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type {
   Experiment,
+  MotionDecision,
   MotionInteraction,
   PlaybackTrack,
   VariantId,
@@ -80,6 +81,15 @@ export interface InspectorHost {
   notes?: Record<string, string>;
 
   renderStage(props: InspectorStageProps): ReactNode;
+
+  /** How the selected component is named in a decision handed to an agent. */
+  decisionComponent?(): MotionDecision["component"];
+  /**
+   * Save a decision where a coding agent can read it (the project's
+   * `motionlab/decisions.json`). Resolve null when that is not possible —
+   * the panel then copies a ready-made prompt instead.
+   */
+  saveDecision?(decision: MotionDecision): Promise<{ file: string } | null>;
 
   settings: InspectorSettings;
   onSettingsChange(next: InspectorSettings): void;

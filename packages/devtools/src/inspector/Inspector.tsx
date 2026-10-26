@@ -11,6 +11,8 @@ import {
 } from "react";
 import {
   chooseWinner,
+  createDecision,
+  decisionPrompt,
   exportVariant,
   promoteWinner,
   swapVariants,
@@ -81,6 +83,8 @@ export function Inspector({ host }: { host: InspectorHost }) {
   const [signal, setSignal] = useState("");
   const [captured, setCaptured] = useState<{ id: string; note?: string } | null>(null);
   const [closing, setClosing] = useState(false);
+  const [sent, setSent] = useState<{ experimentId: string; file: string | null } | null>(null);
+  const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
   const cancelCapture = useRef<(() => void) | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -187,6 +191,36 @@ export function Inspector({ host }: { host: InspectorHost }) {
     },
     [copy, editing, experiment, format, toast],
   );
+
+  /**
+   * Hand the decision to a coding agent: saved into the project when the app
+   * has the MotionLab route, otherwise copied as a ready-made prompt. Either
+   * way the developer ends with one thing to tell the agent.
+   */
+  const sendToAI = useCallback(async () => {
+    if (!experiment || !current || !component) return;
+    const decision = createDecision({
+      experiment,
+      component: host.decisionComponent?.() ?? { id: component.detail, label: component.name },
+      interaction: current.label,
+    });
+    setSending(true);
+    let saved: { file: string } | null = null;
+    try {
+      saved = (await host.saveDecision?.(decision)) ?? null;
+    } catch {
+      saved = null;
+    }
+    setSending(false);
+    if (saved) {
+      setSent({ experimentId: experiment.id, file: saved.file });
+      toast.show("Saved for your AI");
+      return;
+    }
+    const ok = await copy(decisionPrompt(decision));
+    setSent({ experimentId: experiment.id, file: null });
+    toast.show(ok ? "Copied for your AI" : "Copy failed — try Copy code");
+  }, [component, copy, current, experiment, host, toast]);
 
   const startCapture = useCallback(() => {
     if (!host.onCapture) return;
@@ -581,27 +615,46 @@ export function Inspector({ host }: { host: InspectorHost }) {
             <div className="mlui-foot">
               <div className="mlui-hstack" style={{ padding: 12, gap: 8 }}>
                 {winner ? (
-                  <>
-                    <span className="mlui-hstack mlui-grow" style={{ gap: 6 }}>
+                  <div className="mlui-stack mlui-grow" style={{ gap: 10 }}>
+                    <div className="mlui-hstack" style={{ gap: 6 }}>
                       <Icon name="check" size={13} style={{ color: "var(--ml-success)" }} />
-                      <span>
+                      <span className="mlui-grow">
                         <b style={{ fontWeight: 600 }}>{winner}</b> chosen
                       </span>
-                    </span>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        updateExperiment((value) => promoteWinner(value));
-                        setEditing("B");
-                      }}
-                      title={`A becomes ${winner}; B becomes a copy you can keep tuning`}
-                    >
-                      Tune further
-                    </Button>
-                    <Button variant="primary" icon="copy" onClick={() => void copyConfiguration()}>
-                      Copy code
-                    </Button>
-                  </>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          updateExperiment((value) => promoteWinner(value));
+                          setEditing("B");
+                          setSent(null);
+                        }}
+                        title={`A becomes ${winner}; B becomes a copy you can keep tuning`}
+                      >
+                        Tune further
+                      </Button>
+                    </div>
+                    <div className="mlui-hstack" style={{ gap: 8 }}>
+                      <Button variant="primary" block icon="send" disabled={sending} onClick={() => void sendToAI()}>
+                        Send to AI
+                      </Button>
+                      <Button variant="secondary" icon="copy" onClick={() => void copyConfiguration()}>
+                        Copy code
+                      </Button>
+                    </div>
+                    {sent && sent.experimentId === experiment.id ? (
+                      <p className="mlui-note" style={{ margin: 0 }} aria-live="polite">
+                        {sent.file ? (
+                          <>
+                            Saved to <span className="mlui-mono">{sent.file}</span>. Now tell your agent:{" "}
+                            <b style={{ fontWeight: 500, color: "var(--ml-text)" }}>“Apply my MotionLab decisions.”</b>
+                          </>
+                        ) : (
+                          <>Copied a ready-made instruction. Paste it into Claude Code or Codex.</>
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : (
                   <>
                     <Button variant="secondary" block onClick={() => choose("A")}>

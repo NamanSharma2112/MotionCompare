@@ -45,6 +45,8 @@ export interface MotionLabTargetDefinition {
   anchor?: string;
   /** What the declared motion is, e.g. "Enter" or "Closed → Open". */
   interaction?: string;
+  /** Source file of the component, so an agent applying a decision edits the right place. */
+  file?: string;
 }
 
 export interface MotionLabContextValue {
@@ -64,4 +66,7 @@ export interface MotionLabContextValue {
   experiment: Experiment | null;
   updateExperiment(next: Experiment | ((current: Experiment) => Experiment)): void;
   setVariant(variant: VariantId, transition: TransitionConfig): void;
+
+  /** Where "Send to AI" saves decisions, or false when it should only copy. */
+  decisionsEndpoint: string | false;
 }

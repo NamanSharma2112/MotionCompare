@@ -9,7 +9,9 @@
       "@motionlab/ui": ["./packages/ui/src/index.ts"],
       "@motionlab/react": ["./packages/react/src/index.ts"],
       "@motionlab/devtools": ["./packages/devtools/src/index.ts"],
-      "motionlab": ["./packages/motionlab/src/index.ts"]
+      "motionlab": ["./packages/motionlab/src/index.ts"],
+      "motionlab/server": ["./packages/motionlab/src/server.ts"],
+      "@motionlab/server": ["./packages/server/src/index.ts"]
     }
   },
   "include": [

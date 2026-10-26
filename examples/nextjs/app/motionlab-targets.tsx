@@ -16,6 +16,7 @@ export function MotionLabTargets() {
     <MotionLabTarget
       id="checkout-card"
       label="Checkout Card"
+      file="components/checkout-card.tsx"
       // Called once per variant, so A and B each get their own instance.
       render={() => <CheckoutCard />}
       from={{ opacity: 0, y: 20, scale: 0.96 }}

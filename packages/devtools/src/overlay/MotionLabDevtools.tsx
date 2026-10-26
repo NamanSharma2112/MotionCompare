@@ -157,6 +157,23 @@ export function MotionLabDevtools({ defaultOpen = false }: MotionLabDevtoolsProp
         document.body,
       );
     },
+    decisionComponent: () => ({
+      id: target?.id ?? "component",
+      label: target?.label ?? "Component",
+      ...(target?.file ? { file: target.file } : {}),
+    }),
+    async saveDecision(decision) {
+      if (!context.decisionsEndpoint) return null;
+      const response = await fetch(context.decisionsEndpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(decision),
+      });
+      // No route in this app (404) or any failure: the panel copies a prompt.
+      if (!response.ok) return null;
+      const body = (await response.json()) as { file?: string };
+      return { file: body.file ?? "motionlab/decisions.json" };
+    },
     settings,
     onSettingsChange,
     onClose() {

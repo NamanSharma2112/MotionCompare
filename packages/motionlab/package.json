@@ -1,20 +1,33 @@
 {
   "name": "motionlab",
   "version": "0.2.0",
-  "description": "MotionLab — select a real component, compare motion configurations side by side, tune, choose and copy the result into your code.",
+  "description": "MotionLab \u2014 select a real component, compare motion configurations side by side, tune, choose and copy the result into your code.",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
+  },
   "sideEffects": false,
-  "files": ["src"],
-  "keywords": ["motion", "animation", "devtools", "react", "spring", "easing"],
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "motion",
+    "animation",
+    "devtools",
+    "react",
+    "spring",
+    "easing"
+  ],
   "dependencies": {
     "@motionlab/core": "0.2.0",
     "@motionlab/devtools": "0.2.0",
     "@motionlab/dialkit": "0.2.0",
-    "@motionlab/react": "0.2.0"
+    "@motionlab/react": "0.2.0",
+    "@motionlab/server": "0.4.0"
   },
   "peerDependencies": {
     "react": ">=18",

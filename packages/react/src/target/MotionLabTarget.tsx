@@ -23,6 +23,11 @@ export interface MotionLabTargetProps {
   /** A name for the declared motion. Defaults to "Enter". */
   interaction?: string;
   /**
+   * The component's source file, relative to the project root. Recorded in
+   * decisions so a coding agent applies them in the right file.
+   */
+  file?: string;
+  /**
    * Also render the component inline, where the target sits in the tree.
    * Off by default: registering a target is about making it *testable*, not
    * about putting it on the page.
@@ -48,6 +53,7 @@ export function MotionLabTarget({
   stageWidth,
   anchor,
   interaction,
+  file,
   renderInPlace = false,
 }: MotionLabTargetProps): ReactNode {
   const context = useMotionLabContext();
@@ -94,6 +100,7 @@ export function MotionLabTarget({
       ...(stageWidth !== undefined ? { stageWidth } : {}),
       ...(anchor ? { anchor } : {}),
       ...(interaction ? { interaction } : {}),
+      ...(file ? { file } : {}),
     });
     return () => unregisterTarget(id);
   }, [
@@ -109,6 +116,7 @@ export function MotionLabTarget({
     stageWidth,
     anchor,
     interaction,
+    file,
   ]);
 
   if (!renderInPlace) return null;

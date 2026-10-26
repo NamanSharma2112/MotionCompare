@@ -45,3 +45,7 @@ apps/*/.next/
 examples/*/.next/
 apps/extension/dist/
 packages/*/dist/
+
+# MotionLab decisions written by the demo apps' dev servers
+apps/*/motionlab/
+examples/*/motionlab/

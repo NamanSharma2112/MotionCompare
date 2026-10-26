@@ -271,6 +271,14 @@ export function App({ handleRef, shadowHost, stageMount, onClose }: AppProps) {
         stageMount,
       );
     },
+    // On someone else's site there is no project to write into: "Send to AI"
+    // copies a ready-made instruction naming the element and the page.
+    decisionComponent: () => ({
+      id: component?.detail ?? "element",
+      label: component?.name ?? "Element",
+      ...(component ? { selector: component.detail } : {}),
+      url: window.location.href.split("#")[0]!,
+    }),
     settings,
     onSettingsChange(next) {
       setSettings(next);

@@ -23,6 +23,7 @@ export function MotionLabTargets() {
       <MotionLabTarget
         id="checkout-card"
         label="Checkout Card"
+        file="components/demo-components.tsx"
         render={() => <CheckoutCard />}
         from={{ opacity: 0, y: 20, scale: 0.96 }}
         to={{ opacity: 1, y: 0, scale: 1 }}

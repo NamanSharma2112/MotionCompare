@@ -1,6 +1,6 @@
 {
   "name": "@motionlab/extension",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "private": true,
   "description": "MotionLab for Chromium \u2014 the same comparison engine, on any website.",
   "scripts": {

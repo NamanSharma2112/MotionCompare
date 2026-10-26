@@ -5,7 +5,7 @@ A developer tool for designing and tuning UI motion.
 Take a real component and ask: *does this feel better with configuration A or B?*
 
 ```
-SELECT  →  COMPARE  →  TUNE  →  CHOOSE  →  COPY  →  SHIP IT
+SELECT  →  COMPARE  →  TUNE  →  CHOOSE  →  SEND TO AI  →  SHIP IT
 ```
 
 MotionLab works in two environments, on **one shared engine**:
@@ -176,6 +176,68 @@ See `examples/nextjs/app/motionlab-targets.tsx`.
 Each variant is wrapped in its own error boundary. If A throws you get
 `Variant A failed` in A's stage and B keeps working — a devtool must never take the
 application down with it.
+
+---
+
+## Use with Claude Code / Codex
+
+The loop MotionLab is built for: your coding agent writes the animation, you judge it
+on the real component, and the agent applies exactly the values you chose — no
+describing "make it a bit snappier" in words.
+
+**1. Install the skill** so your agent knows how to set MotionLab up and apply decisions:
+
+```bash
+npx skills add NamanSharma2112/MotionCompare --skill motionlab
+```
+
+(or copy `skills/motionlab/SKILL.md` into `.claude/skills/motionlab/`).
+
+**2. Ask the agent:** *"Set up MotionLab on the checkout card."* It installs the SDK,
+adds the provider, the decisions route and a `<MotionLabTarget>` with the component's
+current motion as variant A.
+
+**3. Compare in the browser.** Open the page, click **MotionLab**, pick the component.
+A and B play side by side. Tune B, **Choose**, then **Send to AI**.
+
+**4. Tell the agent:** *"Apply my MotionLab decisions."*
+
+**Send to AI** writes the decision to `motionlab/decisions.json` in your project
+through a development-only route:
+
+```ts
+// app/api/motionlab/route.ts
+import { createMotionLabHandlers } from "motionlab/server";
+
+const handlers = createMotionLabHandlers();
+export const GET = handlers.GET;
+export const POST = handlers.POST;
+```
+
+```json
+{
+  "id": "checkout-card::Enter",
+  "status": "pending",
+  "component": { "id": "checkout-card", "label": "Checkout Card", "file": "components/checkout-card.tsx" },
+  "interaction": "Enter",
+  "chosen": "B",
+  "transition": { "type": "spring", "stiffness": 420, "damping": 30, "mass": 0.8 },
+  "keyframes": { "from": { "opacity": 0, "y": 20 }, "to": { "opacity": 1, "y": 0 } },
+  "code": { "motion": "transition={{ … }}", "css": "…" }
+}
+```
+
+The route answers 404 in production, only writes inside the project, rejects bodies
+over 64 KB and regenerates the code snippets itself rather than trusting the client.
+The latest choice for a component and interaction replaces the earlier one; the agent
+marks entries `"applied"` once done.
+
+Without the route (or from the browser extension), **Send to AI** copies a ready-made
+instruction with the values and code instead — paste it into your agent.
+
+Pass `file` to `<MotionLabTarget>` so the agent knows where the motion lives, and
+`decisionsEndpoint` to `<MotionLabProvider>` if you mount the route elsewhere
+(`false` to always copy).
 
 ---
 

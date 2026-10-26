@@ -1,0 +1,15 @@
+{
+  "name": "@motionlab/server",
+  "version": "0.4.0",
+  "description": "Dev-only endpoint that saves MotionLab decisions into your project for coding agents to apply.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "sideEffects": false,
+  "files": ["src"],
+  "dependencies": {
+    "@motionlab/core": "0.2.0"
+  }
+}

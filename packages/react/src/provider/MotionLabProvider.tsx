@@ -9,7 +9,10 @@ import {
   type ReactNode,
 } from "react";
 import {
+  DEFAULT_SPRING,
+  convertTransition,
   createExperiment,
+  presetTransition,
   createExperimentStorage,
   setVariantTransition,
   targetStorageKey,
@@ -37,6 +40,12 @@ export interface MotionLabProviderProps {
   storage?: StorageAdapter;
   /** Expose registered targets to the browser extension. Defaults to true. */
   bridge?: boolean;
+  /**
+   * The dev route "Send to AI" saves decisions through (see
+   * `motionlab/server`). Defaults to `/api/motionlab`; when the route is
+   * missing, the panel copies a ready-made prompt instead. `false` always copies.
+   */
+  decisionsEndpoint?: string | false;
 }
 
 function browserStorage(): StorageAdapter | null {
@@ -78,6 +87,7 @@ export function MotionLabProvider({
   productionPreview,
   storage,
   bridge = true,
+  decisionsEndpoint = "/api/motionlab",
 }: MotionLabProviderProps) {
   // Start from the server-safe answer, then re-resolve on the client where
   // `window.location.search` is actually readable. Deciding enablement during
@@ -141,16 +151,27 @@ export function MotionLabProvider({
       // A previously tuned experiment for this target beats a fresh one: the
       // point of persistence is that yesterday's comparison is still there.
       const saved = experimentStorage?.load(targetStorageKey(id));
+      // A is what the code does today. B starts somewhere genuinely
+      // different, so the very first replay is already a comparison.
+      const current = target.transition ?? DEFAULT_SPRING;
+      const smooth = presetTransition("smooth", "spring")!;
+      const snappy = presetTransition("snappy", "spring")!;
+      const explore =
+        current.type === "easing"
+          ? convertTransition(current, "spring")
+          : JSON.stringify(current) === JSON.stringify(snappy)
+            ? smooth
+            : snappy;
       setExperiment(
-        saved ?? {
-          ...createExperiment({
+        saved ??
+          createExperiment({
             id,
             label: target.label,
             source: "react",
             keyframes: { from: target.from, to: target.to },
-            ...(target.transition ? { variantA: { transition: target.transition } } : {}),
+            variantA: { name: "Current", transition: current },
+            variantB: { name: "Experiment", transition: explore },
           }),
-        },
       );
       setOpenTargetId(id);
     },
@@ -196,6 +217,7 @@ export function MotionLabProvider({
       experiment,
       updateExperiment,
       setVariant,
+      decisionsEndpoint,
     }),
     [
       enabled,
@@ -209,6 +231,7 @@ export function MotionLabProvider({
       experiment,
       updateExperiment,
       setVariant,
+      decisionsEndpoint,
     ],
   );
 
