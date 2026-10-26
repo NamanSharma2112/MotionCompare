@@ -29,7 +29,10 @@ function Popup() {
   const [busy, setBusy] = useState(false);
 
   const run = useCallback(async (command: ExtensionCommand, closeAfter = false) => {
-    setBusy(true);
+    // Checking status never disables anything: the SDK probe can take a few
+    // hundred milliseconds, and a greyed-out primary button reads as broken.
+    const acting = command.type !== "GET_STATUS";
+    if (acting) setBusy(true);
     setError(null);
     try {
       const response = await send(command);
@@ -42,7 +45,7 @@ function Popup() {
     } catch (cause) {
       setError(explain(cause instanceof Error ? cause.message : "Could not reach the page."));
     } finally {
-      setBusy(false);
+      if (acting) setBusy(false);
     }
   }, []);
 
