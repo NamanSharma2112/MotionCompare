@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "MotionLab",
+  "version": "0.2.0",
+  "description": "Select an element on any page, compare two motion configurations side by side, tune, choose and copy the result.",
+  "minimum_chrome_version": "111",
+  "action": {
+    "default_title": "MotionLab",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "icons": {}
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@motionlab/example-nextjs",
+  "version": "0.2.0",
+  "private": true,
+  "description": "A real Next.js application with the MotionLab SDK installed.",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001"
+  },
+  "dependencies": {
+    "motionlab": "0.2.0",
+    "next": "16.4.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  }
+}
