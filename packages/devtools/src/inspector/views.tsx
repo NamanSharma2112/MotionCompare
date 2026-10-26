@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   exportVariant,
   getVariant,
@@ -11,19 +11,14 @@ import {
 } from "@motionlab/core";
 import {
   Button,
-  CurvePlot,
   EmptyState,
   Icon,
   IconButton,
-  InspectorRow,
   InteractionRow,
-  MiniTimeline,
   Popover,
   Section,
   SegmentedControl,
   StatusDot,
-  Switch,
-  type TimelineLane,
 } from "@motionlab/ui";
 import { TransitionEditor, ValuesEditor } from "./ExperimentControls";
 import {
@@ -248,83 +243,177 @@ export function InteractionsSection({
   );
 }
 
-/* ------------------------------------------------------------ experiment -- */
+/* --------------------------------------------------------------- compare -- */
 
-export function ExperimentSection({
+/**
+ * The heart of the panel: A against B, and the button that plays them.
+ * Always on screen once something is selected — there is no separate
+ * Compare view to find.
+ */
+export function CompareBlock({
+  interaction,
+  onReplay,
+  playing,
+  sync,
+  onSync,
+  loop,
+  onLoop,
+  speed,
+  onSpeed,
+  onRecord,
+}: {
+  interaction: MotionInteraction;
+  onReplay(): void;
+  playing: boolean;
+  sync: boolean;
+  onSync(value: boolean): void;
+  loop: boolean;
+  onLoop(value: boolean): void;
+  speed: number;
+  onSpeed(value: number): void;
+  onRecord?(): void;
+}) {
+  const { variantA, variantB, winner } = interaction.experiment;
+  const isDefault = interaction.trigger === "declared" && interaction.experiment.source === "dom";
+
+  return (
+    <Section
+      label="Compare"
+      aside={<span className="mlui-meta">{interaction.label}</span>}
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {[variantA, variantB].map((variant) => (
+          <div key={variant.id} className="mlui-stack" style={{ gap: 1 }}>
+            <span className="mlui-hstack" style={{ gap: 6 }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>{variant.id}</span>
+              <span className="mlui-meta">{variant.name}</span>
+              {winner === variant.id ? (
+                <Icon name="check" size={12} style={{ color: "var(--ml-success)" }} />
+              ) : null}
+            </span>
+            <span className="mlui-meta mlui-num">
+              {variant.name === typeLabel(variant.transition) ? "" : `${typeLabel(variant.transition)} · `}
+              {transitionSummary(variant.transition)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="mlui-hstack" style={{ marginTop: 12, gap: 4 }}>
+        <Button variant="primary" icon={playing ? "replay" : "play"} onClick={onReplay} style={{ flex: 1 }}>
+          Replay A and B
+        </Button>
+        <IconButton
+          icon="loop"
+          label={loop ? "Loop on" : "Loop"}
+          active={loop}
+          onClick={() => onLoop(!loop)}
+        />
+        <IconButton
+          text={speed === 1 ? "1×" : speed === 0.5 ? "½×" : "¼×"}
+          label="Playback speed"
+          active={speed !== 1}
+          onClick={() => onSpeed(speed === 1 ? 0.5 : speed === 0.5 ? 0.25 : 1)}
+        />
+      </div>
+
+      <div style={{ marginTop: 8 }}>
+        <SegmentedControl
+          block
+          label="How A and B play"
+          value={sync ? "together" : "sequence"}
+          options={[
+            { value: "together", label: "Side by side" },
+            { value: "sequence", label: "One after another" },
+          ]}
+          onChange={(value) => onSync(value === "together")}
+        />
+      </div>
+
+      {onRecord ? (
+        <p className="mlui-note" style={{ margin: "10px 0 0" }}>
+          {isDefault ? "Comparing a default entrance. " : null}
+          <button
+            type="button"
+            className="mlui-crumb"
+            style={{ color: "var(--ml-accent)", fontSize: 11 }}
+            onClick={onRecord}
+          >
+            {isDefault ? "Use this element’s real motion" : "Record another interaction"}
+          </button>
+        </p>
+      ) : null}
+    </Section>
+  );
+}
+
+/* ------------------------------------------------------------------ tune -- */
+
+/**
+ * Tuning, directly under the comparison it changes. B is selected by
+ * default — it is the one being explored — and every release replays both.
+ */
+export function TuneBlock({
   experiment,
   editing,
   onEditingChange,
   onExperimentChange,
   onCommit,
-  onFocus,
-  onTimeline,
-  subscribeFrame,
-  playing,
 }: {
   experiment: Experiment;
   editing: VariantId;
   onEditingChange(variant: VariantId): void;
   onExperimentChange(next: Experiment): void;
   onCommit(): void;
-  onFocus(): void;
-  onTimeline(): void;
-  subscribeFrame(listener: (elapsed: number, total: number) => void): () => void;
-  playing: boolean;
 }) {
+  const [showValues, setShowValues] = useState(false);
   const variant = getVariant(experiment, editing);
-  const lanes = laneFor(experiment, editing);
 
   return (
-    <>
-      <Section
-        label="Experiment"
-        aside={<IconButton icon="focus" label={`Focus on ${editing}`} size="sm" onClick={onFocus} />}
-      >
-        <div style={{ marginBottom: 10 }}>
-          <SegmentedControl
-            block
-            label="Variant to tune"
-            value={editing}
-            options={[
-              { value: "A", label: <VariantLabel id="A" name={experiment.variantA.name ?? "Current"} />, name: "A, current" },
-              { value: "B", label: <VariantLabel id="B" name={experiment.variantB.name ?? "Experiment"} />, name: "B, experiment" },
-            ]}
-            onChange={onEditingChange}
-          />
-        </div>
-        <TransitionEditor
-          transition={variant.transition}
-          onChange={(transition) =>
-            onExperimentChange(
-              editing === "A"
-                ? { ...experiment, variantA: { ...experiment.variantA, transition } }
-                : { ...experiment, variantB: { ...experiment.variantB, transition } },
-            )
-          }
-          onCommit={onCommit}
+    <Section label="Tune">
+      <div style={{ marginBottom: 10 }}>
+        <SegmentedControl
+          block
+          label="Variant to tune"
+          value={editing}
+          options={[
+            { value: "A", label: <VariantLabel id="A" name={experiment.variantA.name ?? "Current"} />, name: "A" },
+            { value: "B", label: <VariantLabel id="B" name={experiment.variantB.name ?? "Experiment"} />, name: "B" },
+          ]}
+          onChange={onEditingChange}
         />
-      </Section>
-
-      <Section label="Values">
+      </div>
+      <TransitionEditor
+        transition={variant.transition}
+        onChange={(transition) =>
+          onExperimentChange(
+            editing === "A"
+              ? { ...experiment, variantA: { ...experiment.variantA, transition } }
+              : { ...experiment, variantB: { ...experiment.variantB, transition } },
+          )
+        }
+        onCommit={onCommit}
+      />
+      <button
+        type="button"
+        className="mlui-add"
+        aria-expanded={showValues}
+        onClick={() => setShowValues((value) => !value)}
+        style={{ marginTop: 4, height: 24, fontSize: 11 }}
+      >
+        <span className="mlui-disclosure" data-open={showValues ? "" : undefined}>
+          <Icon name="expand" size={12} />
+        </span>
+        Start and end values
+      </button>
+      {showValues ? (
         <ValuesEditor
           keyframes={experiment.keyframes}
           onChange={(keyframes) => onExperimentChange({ ...experiment, keyframes })}
           onCommit={onCommit}
         />
-      </Section>
-
-      <Section
-        label="Timeline"
-        aside={<IconButton icon="timeline" label="Expand timeline" size="sm" onClick={onTimeline} />}
-      >
-        <MiniTimeline
-          lanes={lanes.lanes}
-          total={lanes.total}
-          playing={playing}
-          subscribeFrame={subscribeFrame}
-        />
-      </Section>
-    </>
+      ) : null}
+    </Section>
   );
 }
 
@@ -335,17 +424,6 @@ function VariantLabel({ id, name }: { id: VariantId; name: string }) {
       <span>{name}</span>
     </span>
   );
-}
-
-function laneFor(experiment: Experiment, editing: VariantId): { lanes: TimelineLane[]; total: number } {
-  const transition = getVariant(experiment, editing).transition;
-  const delay = transition.delay ?? 0;
-  const duration = Number.parseFloat(durationLabel(transition));
-  const properties = cssPropertiesFor(experiment.keyframes);
-  return {
-    lanes: (properties.length ? properties : ["transform"]).map((name) => ({ name, start: delay, duration })),
-    total: delay + duration,
-  };
 }
 
 /* ------------------------------------------------------------- recording -- */
@@ -418,121 +496,6 @@ export function Captured({
   );
 }
 
-/* --------------------------------------------------------------- compare -- */
-
-export function Compare({
-  interaction,
-  sync,
-  onSync,
-  loop,
-  onLoop,
-  speed,
-  onSpeed,
-  onReplay,
-  playing,
-}: {
-  interaction: MotionInteraction;
-  sync: boolean;
-  onSync(value: boolean): void;
-  loop: boolean;
-  onLoop(value: boolean): void;
-  speed: number;
-  onSpeed(value: number): void;
-  onReplay(): void;
-  playing: boolean;
-}) {
-  const { variantA, variantB, winner } = interaction.experiment;
-  return (
-    <>
-      <Section label="Compare">
-        <div className="mlui-name">{interaction.label}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
-          {[variantA, variantB].map((variant) => (
-            <div key={variant.id} className="mlui-stack" style={{ gap: 2 }}>
-              <span className="mlui-hstack" style={{ gap: 6 }}>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>{variant.id}</span>
-                {winner === variant.id ? <Icon name="check" size={12} style={{ color: "var(--ml-success)" }} /> : null}
-              </span>
-              <span className="mlui-meta">{variant.name ?? (variant.id === "A" ? "Current" : "Experiment")}</span>
-              <span style={{ marginTop: 8 }}>{typeLabel(variant.transition)}</span>
-              <span className="mlui-meta mlui-num">{transitionSummary(variant.transition)}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>
-          <Button variant="primary" icon={playing ? "replay" : "play"} onClick={onReplay}>
-            Replay
-          </Button>
-        </div>
-      </Section>
-      <Section>
-        <InspectorRow label="Sync">
-          <span className="mlui-hstack" style={{ gap: 8 }}>
-            <span className="mlui-meta">{sync ? "Side by side" : "One after another"}</span>
-            <Switch label="Play A and B at the same time" checked={sync} onChange={onSync} />
-          </span>
-        </InspectorRow>
-        <InspectorRow label="Loop">
-          <Switch label="Loop" checked={loop} onChange={onLoop} />
-        </InspectorRow>
-        <InspectorRow label="Speed">
-          <SegmentedControl
-            label="Playback speed"
-            value={String(speed)}
-            options={[
-              { value: "1", label: "1×" },
-              { value: "0.5", label: "½×", name: "Half speed" },
-              { value: "0.25", label: "¼×", name: "Quarter speed" },
-            ]}
-            onChange={(value) => onSpeed(Number(value))}
-          />
-        </InspectorRow>
-      </Section>
-    </>
-  );
-}
-
-/* ----------------------------------------------------------------- focus -- */
-
-export function Focus({
-  experiment,
-  variant,
-  onExperimentChange,
-  onCommit,
-  onReplay,
-}: {
-  experiment: Experiment;
-  variant: VariantId;
-  onExperimentChange(next: Experiment): void;
-  onCommit(): void;
-  onReplay(): void;
-}) {
-  const definition = getVariant(experiment, variant);
-  return (
-    <Section>
-      <div className="mlui-name" style={{ marginBottom: 12 }}>
-        {variant === "A" ? "Current" : "Experiment"} {variant}
-      </div>
-      <TransitionEditor
-        transition={definition.transition}
-        onChange={(transition) =>
-          onExperimentChange(
-            variant === "A"
-              ? { ...experiment, variantA: { ...experiment.variantA, transition } }
-              : { ...experiment, variantB: { ...experiment.variantB, transition } },
-          )
-        }
-        onCommit={onCommit}
-      />
-      <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
-        <Button variant="secondary" icon="play" onClick={onReplay}>
-          Replay
-        </Button>
-      </div>
-    </Section>
-  );
-}
-
 /* ---------------------------------------------------------------- export -- */
 
 const FORMATS: Array<{ value: ExportFormat; label: string }> = [
@@ -572,36 +535,6 @@ export function Export({
         <Button variant="primary" block icon="copy" onClick={() => onCopy(result.code)}>
           Copy {FORMATS.find((entry) => entry.value === format)?.label}
         </Button>
-      </div>
-    </Section>
-  );
-}
-
-/* -------------------------------------------------------------- timeline -- */
-
-export function TimelineDetail({ experiment }: { experiment: Experiment }) {
-  return (
-    <Section>
-      <CurvePlot a={experiment.variantA.transition} b={experiment.variantB.transition} height={150} />
-      <div className="mlui-stack" style={{ marginTop: 12, gap: 6 }}>
-        {[experiment.variantA, experiment.variantB].map((variant) => (
-          <div key={variant.id} className="mlui-hstack">
-            <svg width="18" height="6" aria-hidden="true">
-              <line
-                x1="0"
-                y1="3"
-                x2="18"
-                y2="3"
-                stroke={variant.id === "A" ? "var(--ml-muted)" : "var(--ml-text)"}
-                strokeWidth={variant.id === "A" ? 1.5 : 1.75}
-                strokeDasharray={variant.id === "A" ? "3 3" : undefined}
-              />
-            </svg>
-            <span style={{ fontWeight: 600 }}>{variant.id}</span>
-            <span className="mlui-meta mlui-grow">{variant.name}</span>
-            <span className="mlui-meta mlui-num">{transitionSummary(variant.transition)}</span>
-          </div>
-        ))}
       </div>
     </Section>
   );

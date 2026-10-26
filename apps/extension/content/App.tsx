@@ -6,6 +6,7 @@ import {
   Inspector,
   StageLayer,
   breadcrumbFor,
+  defaultInteractionFor,
   elementPath,
   nameElement,
   recordInteraction,
@@ -76,11 +77,28 @@ export function App({ handleRef, shadowHost, stageMount, onClose }: AppProps) {
 
   const select = useCallback((next: Element) => {
     selectionCounter += 1;
+    sources.current.clear();
+    // Something to compare from the first moment: no recording required.
+    const initial = defaultInteractionFor(next);
+    sources.current.set(initial.interaction.experiment.id, {
+      subject: initial.subject,
+      snapshot: initial.snapshot,
+    });
     setElement(next);
     setSelectionKey(`selection-${selectionCounter}`);
-    setInteractions([]);
+    setInteractions([initial.interaction]);
     setNotes({});
-    sources.current.clear();
+    // Restore a comparison tuned on this element before.
+    void loadExperiment(experimentKey(selectorFor(next), initial.interaction.label)).then((saved) => {
+      if (!saved) return;
+      setInteractions((previous) =>
+        previous.map((interaction) =>
+          interaction.id === initial.interaction.id
+            ? { ...interaction, experiment: { ...saved, id: interaction.experiment.id, keyframes: saved.keyframes } }
+            : interaction,
+        ),
+      );
+    });
   }, []);
 
   const startPicking = useCallback(() => {
@@ -208,7 +226,11 @@ export function App({ handleRef, shadowHost, stageMount, onClose }: AppProps) {
                 subject: motion.subject,
                 snapshot: motion.snapshot,
               });
-              setInteractions((previous) => [...previous, interaction]);
+              // The real motion replaces the default entrance it stood in for.
+              setInteractions((previous) => [
+                ...previous.filter((entry) => entry.trigger !== "declared"),
+                interaction,
+              ]);
               if (motion.note) setNotes((previous) => ({ ...previous, [interaction.id]: motion.note! }));
               handlers.onCaptured(interaction, motion.note);
             });

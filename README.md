@@ -223,22 +223,23 @@ npm run build:extension
 Load `apps/extension/dist` at `chrome://extensions` → *Load unpacked*. Chromium only.
 
 **Use it:** click the MotionLab toolbar icon on any page → **Inspect component** → click
-an element (↑ selects its parent, Esc cancels). The inspector panel opens on the page:
+an element (↑ selects its parent, Esc cancels). That's all it takes to start comparing:
 
 ```
-Select → Capture interaction → use the component normally → Captured
-       → Tune B (dials replay on release) → Compare → Choose B → Copy
+Select → A and B appear on the page and play → tweak B → Choose B → Copy code
 ```
 
-- **Capture** records the first burst of motion the component performs. It reads
-  `getAnimations()` every frame (CSS transitions, CSS animations, Web Animations API) and
-  a MutationObserver for state (`aria-expanded`, `data-state`, `open`, nodes entering), so
-  an interaction is named the way its author thinks of it: "Closed → Open". A starts as
-  what the page does today; B starts as the same pace re-expressed as a spring.
-- **Replay happens in place.** A styled clone plays exactly over the real element, which
-  is hidden for the duration and restored the instant playback stops. In Compare, B sits
-  beside it (or plays after A in the same spot with Sync off).
-- **Freeze, loop and slow motion** (½×, ¼×) run on the same single clock as everything else.
+- **A and B are on the page straight away**, side by side, labelled, and play once. A is
+  the element's own CSS transition when it declares one (otherwise a typical ease-out);
+  B is the same pace as a spring. The motion is a default entrance (fade and small rise),
+  editable under *Start and end values*.
+- **One screen.** Compare (A vs B, **Replay A and B**, loop, speed, side by side or one
+  after another) and Tune (presets and three dials for B) sit together. Every slider
+  release or preset click replays both.
+- **Recording is optional.** *Use this element's real motion* captures what the element
+  actually does when you use it: CSS transitions, CSS animations and the Web Animations
+  API, read every frame, with the state named from `aria-expanded`, `data-state`, `open`
+  and so on ("Closed → Open"). The captured motion replaces the default entrance.
 - **⌘K / Ctrl K** opens commands. Space replays, A/B choose, S swaps, Esc goes back or closes.
 - The panel floats (drag its header) or docks right; light, dark or system theme.
 

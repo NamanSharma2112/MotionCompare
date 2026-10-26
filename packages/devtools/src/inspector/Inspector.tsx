@@ -42,42 +42,33 @@ import type { InspectorHost } from "./types";
 import { useStagePlayback } from "./useStagePlayback";
 import {
   Captured,
-  Compare,
+  CompareBlock,
   ComponentSection,
-  ExperimentSection,
   Export,
-  Focus,
   InteractionsSection,
   NothingSelected,
   Picking,
   Recording,
-  TimelineDetail,
+  TuneBlock,
   ViewBody,
 } from "./views";
 
-type View = "home" | "recording" | "captured" | "compare" | "focus" | "export" | "timeline";
+type View = "home" | "recording" | "captured" | "export";
 
 const SUB_VIEW_TITLE: Partial<Record<View, string>> = {
-  compare: "Compare",
-  focus: "Experiment",
   export: "Copy configuration",
-  timeline: "Timeline",
 };
 
-const SPEEDS = [1, 0.5, 0.25];
 const SEQUENCE_GAP = 280;
-
-function speedLabel(speed: number): string {
-  return speed === 1 ? "1×" : speed === 0.5 ? "½×" : speed === 0.25 ? "¼×" : `${speed}×`;
-}
 
 /**
  * The MotionLab inspector.
  *
- * One panel for every environment. Select a component, capture what it does,
- * then tune A against B with the result replaying in place on the page. The
- * panel stays small and quiet — the component is what should be looked at —
- * and every view keeps the panel's footprint so switching never jumps.
+ * One panel for every environment, and one screen once something is
+ * selected: A and B are already on the page side by side, Replay is the
+ * biggest button, B's dials sit right under it, and the decision closes the
+ * panel's footer. Recording the element's real motion is available but never
+ * required to start comparing.
  */
 export function Inspector({ host }: { host: InspectorHost }) {
   const { settings, component, interactions } = host;
@@ -154,37 +145,31 @@ export function Inspector({ host }: { host: InspectorHost }) {
     ];
   }, [experiment, slotFor, sync]);
 
-  const replay = useCallback(
-    (variant?: VariantId) => {
-      if (!experiment) return;
-      if (view === "compare") {
-        playback.play(compareSlots(), true);
-        return;
-      }
-      playback.play([slotFor(variant ?? editing)], false);
-    },
-    [compareSlots, editing, experiment, playback, slotFor, view],
-  );
+  /** Replay A and B together — every replay is a comparison. */
+  const replay = useCallback(() => {
+    if (!experiment) return;
+    playback.play(compareSlots(), true);
+  }, [compareSlots, experiment, playback]);
 
-  // Compare holds both variants up at rest; leaving it puts the page back.
+  // While something is selected and the main screen is up, A and B stay on
+  // the page at rest. Recording, picking or closing puts the page back.
+  const comparing = view === "home" && Boolean(experiment) && !host.picking;
   useEffect(() => {
-    if (view === "compare" && experiment) {
-      playback.hold(compareSlots(), true);
-      return () => playback.release();
-    }
-    return undefined;
+    if (!comparing) return undefined;
+    playback.hold(compareSlots(), true);
+    return () => playback.release();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, sync, current?.id]);
+  }, [comparing, sync, current?.id]);
 
-  const toggleFreeze = useCallback(() => {
-    if (snapshot.state === "idle") replay();
-    else playback.togglePause();
-  }, [playback, replay, snapshot.state]);
-
-  const cycleSpeed = useCallback(() => {
-    const index = SPEEDS.indexOf(snapshot.speed);
-    controller.setSpeed(SPEEDS[(index + 1) % SPEEDS.length] ?? 1);
-  }, [controller, snapshot.speed]);
+  // Play once the moment a component is selected, so the comparison is the
+  // first thing seen rather than something to go looking for.
+  const autoPlayed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!comparing || !componentKey || autoPlayed.current === componentKey) return;
+    autoPlayed.current = componentKey;
+    const frame = requestAnimationFrame(() => actions.current.replay());
+    return () => cancelAnimationFrame(frame);
+  }, [comparing, componentKey]);
 
   /* ------------------------------------------------------------ actions -- */
 
@@ -216,6 +201,11 @@ export function Inspector({ host }: { host: InspectorHost }) {
         setEditing("B");
         setCaptured({ id: interaction.id, ...(note ? { note } : {}) });
         setView("captured");
+        // Straight back to comparing; the confirmation is a beat, not a stop.
+        window.setTimeout(() => {
+          setView((currentView) => (currentView === "captured" ? "home" : currentView));
+          requestAnimationFrame(() => actions.current.replay());
+        }, 1400);
       },
     });
   }, [host, playback]);
@@ -354,15 +344,11 @@ export function Inspector({ host }: { host: InspectorHost }) {
   const commands = useMemo<CommandItem[]>(() => {
     const items: CommandItem[] = [];
     if (host.onStartPicking) {
-      items.push({ id: "inspect", label: "Inspect component", icon: "inspect", run: () => host.onStartPicking?.() });
-    }
-    if (host.onCapture && component) {
-      items.push({ id: "capture", label: "Capture interaction", icon: "add", run: startCapture });
+      items.push({ id: "inspect", label: "Select another element", icon: "inspect", run: () => host.onStartPicking?.() });
     }
     if (current) {
       items.push(
-        { id: "compare", label: "Compare interaction", icon: "compare", run: () => setView("compare") },
-        { id: "replay", label: "Replay", icon: "replay", shortcut: "Space", run: () => replay() },
+        { id: "replay", label: "Replay A and B", icon: "replay", shortcut: "Space", run: () => replay() },
         {
           id: "loop",
           label: snapshot.loop ? "Turn loop off" : "Loop",
@@ -370,18 +356,15 @@ export function Inspector({ host }: { host: InspectorHost }) {
           run: () => controller.setLoop(!snapshot.loop),
         },
         {
-          id: "freeze",
-          label: snapshot.paused ? "Resume" : "Freeze",
-          icon: snapshot.paused ? "play" : "pause",
-          disabled: snapshot.state === "idle",
-          run: () => playback.togglePause(),
+          id: "sync",
+          label: sync ? "Play one after another" : "Play side by side",
+          icon: "compare",
+          run: () => setSync(!sync),
         },
         { id: "slow", label: "Slow motion ¼×", keywords: ["speed"], run: () => controller.setSpeed(0.25) },
         { id: "realtime", label: "Real-time speed", keywords: ["speed", "1x"], run: () => controller.setSpeed(1) },
-        { id: "copy", label: "Copy configuration", icon: "copy", run: () => void copyConfiguration() },
+        { id: "copy", label: "Copy code", icon: "copy", run: () => void copyConfiguration() },
         { id: "export", label: "Copy as CSS or JSON…", icon: "copy", run: () => setView("export") },
-        { id: "focus", label: "Focus on experiment B", icon: "focus", run: () => setView("focus") },
-        { id: "timeline", label: "Show timeline", icon: "timeline", run: () => setView("timeline") },
         { id: "choose-a", label: "Keep A", shortcut: "A", group: "Decide", run: () => choose("A") },
         { id: "choose-b", label: "Choose B", shortcut: "B", group: "Decide", run: () => choose("B") },
         {
@@ -392,6 +375,9 @@ export function Inspector({ host }: { host: InspectorHost }) {
           run: () => updateExperiment((value) => swapVariants(value)),
         },
       );
+    }
+    if (host.onCapture && component) {
+      items.push({ id: "capture", label: "Use this element’s real motion", icon: "add", run: startCapture });
     }
     items.push(
       {
@@ -408,14 +394,14 @@ export function Inspector({ host }: { host: InspectorHost }) {
     );
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [host, component, current, snapshot, settings, startCapture, replay, copyConfiguration, choose, requestClose]);
+  }, [host, component, current, snapshot, settings, sync, startCapture, replay, copyConfiguration, choose, requestClose]);
 
   /* -------------------------------------------------------------- views -- */
 
   const capturedInteraction = captured ? interactions.find((entry) => entry.id === captured.id) : null;
   const title = SUB_VIEW_TITLE[view];
-  const showTransport = Boolean(current) && (view === "home" || view === "focus" || view === "timeline");
   const playing = snapshot.state === "playing";
+  const showDecision = Boolean(current) && view === "home" && !host.picking;
 
   let body: ReactNode;
   if (view === "recording") {
@@ -425,32 +411,11 @@ export function Inspector({ host }: { host: InspectorHost }) {
       <Captured
         interaction={capturedInteraction}
         {...(captured?.note ? { note: captured.note } : {})}
-        onReplay={() => replay("A")}
+        onReplay={() => {
+          setView("home");
+          requestAnimationFrame(() => actions.current.replay());
+        }}
         onContinue={back}
-      />
-    );
-  } else if (view === "compare" && current) {
-    body = (
-      <Compare
-        interaction={current}
-        sync={sync}
-        onSync={setSync}
-        loop={snapshot.loop}
-        onLoop={(value) => controller.setLoop(value)}
-        speed={snapshot.speed}
-        onSpeed={(value) => controller.setSpeed(value)}
-        onReplay={() => playback.play(compareSlots(), true)}
-        playing={playing}
-      />
-    );
-  } else if (view === "focus" && experiment) {
-    body = (
-      <Focus
-        experiment={experiment}
-        variant={editing}
-        onExperimentChange={updateExperiment}
-        onCommit={() => replay()}
-        onReplay={() => replay()}
       />
     );
   } else if (view === "export" && experiment) {
@@ -463,8 +428,6 @@ export function Inspector({ host }: { host: InspectorHost }) {
         onCopy={(code) => void copyConfiguration(code)}
       />
     );
-  } else if (view === "timeline" && experiment) {
-    body = <TimelineDetail experiment={experiment} />;
   } else if (host.picking) {
     body = <Picking onCancel={() => host.onCancelPicking?.()} />;
   } else if (!component) {
@@ -487,34 +450,44 @@ export function Inspector({ host }: { host: InspectorHost }) {
             : {})}
           {...(host.onSelectPath ? { onSelectPath: host.onSelectPath } : {})}
         />
-        <InteractionsSection
-          interactions={interactions}
-          currentId={current?.id ?? null}
-          onSelect={(id) => setCurrentId(id)}
-          onReplay={(id) => {
-            setCurrentId(id);
-            // Wait a render so the stage picks up the newly selected experiment.
-            requestAnimationFrame(() => actions.current.replay("A"));
-          }}
-          {...(host.onCapture
-            ? {
-                onRemove: (id: string) =>
-                  host.onInteractionsChange(interactions.filter((interaction) => interaction.id !== id)),
-                onCapture: startCapture,
-              }
-            : {})}
-        />
+        {current ? (
+          <CompareBlock
+            interaction={current}
+            onReplay={replay}
+            playing={playing}
+            sync={sync}
+            onSync={setSync}
+            loop={snapshot.loop}
+            onLoop={(value) => controller.setLoop(value)}
+            speed={snapshot.speed}
+            onSpeed={(value) => controller.setSpeed(value)}
+            {...(host.onCapture ? { onRecord: startCapture } : {})}
+          />
+        ) : null}
+        {interactions.length > 1 ? (
+          <InteractionsSection
+            interactions={interactions}
+            currentId={current?.id ?? null}
+            onSelect={(id) => setCurrentId(id)}
+            onReplay={(id) => {
+              setCurrentId(id);
+              requestAnimationFrame(() => actions.current.replay());
+            }}
+            {...(host.onCapture
+              ? {
+                  onRemove: (id: string) =>
+                    host.onInteractionsChange(interactions.filter((interaction) => interaction.id !== id)),
+                }
+              : {})}
+          />
+        ) : null}
         {experiment ? (
-          <ExperimentSection
+          <TuneBlock
             experiment={experiment}
             editing={editing}
             onEditingChange={setEditing}
             onExperimentChange={updateExperiment}
-            onCommit={() => replay()}
-            onFocus={() => setView("focus")}
-            onTimeline={() => setView("timeline")}
-            subscribeFrame={controller.subscribeFrame}
-            playing={playing}
+            onCommit={replay}
           />
         ) : null}
       </>
@@ -567,7 +540,7 @@ export function Inspector({ host }: { host: InspectorHost }) {
               </MenuItem>
               {current ? (
                 <MenuItem icon="copy" onSelect={() => setView("export")}>
-                  Copy configuration…
+                  Copy as CSS or JSON…
                 </MenuItem>
               ) : null}
               {(host.onStartPicking || host.onChangeComponent) && component ? (
@@ -575,7 +548,7 @@ export function Inspector({ host }: { host: InspectorHost }) {
                   icon="inspect"
                   onSelect={() => (host.onStartPicking ?? host.onChangeComponent)?.()}
                 >
-                  {host.onStartPicking ? "Inspect another component" : "Choose another target"}
+                  {host.onStartPicking ? "Select another element" : "Choose another target"}
                 </MenuItem>
               ) : null}
               <MenuSeparator />
@@ -604,26 +577,9 @@ export function Inspector({ host }: { host: InspectorHost }) {
             {toast.node}
           </div>
 
-          {showTransport && experiment ? (
+          {showDecision && experiment ? (
             <div className="mlui-foot">
-              <div className="mlui-hstack" style={{ gap: 2, padding: "6px 8px" }}>
-                <IconButton icon="replay" label="Replay" shortcut="Space" onClick={() => replay()} />
-                <IconButton
-                  icon={playing && !snapshot.paused ? "pause" : "play"}
-                  label={snapshot.paused ? "Resume" : playing ? "Freeze" : "Play"}
-                  onClick={toggleFreeze}
-                />
-                <IconButton
-                  icon="loop"
-                  label={snapshot.loop ? "Loop on" : "Loop"}
-                  active={snapshot.loop}
-                  onClick={() => controller.setLoop(!snapshot.loop)}
-                />
-                <IconButton text={speedLabel(snapshot.speed)} label="Playback speed" active={snapshot.speed !== 1} onClick={cycleSpeed} />
-                <span className="mlui-grow" />
-                <IconButton icon="compare" label="Compare A and B" onClick={() => setView("compare")} />
-              </div>
-              <div className="mlui-hstack" style={{ padding: "0 12px 12px", gap: 8 }}>
+              <div className="mlui-hstack" style={{ padding: 12, gap: 8 }}>
                 {winner ? (
                   <>
                     <span className="mlui-hstack mlui-grow" style={{ gap: 6 }}>
@@ -638,11 +594,12 @@ export function Inspector({ host }: { host: InspectorHost }) {
                         updateExperiment((value) => promoteWinner(value));
                         setEditing("B");
                       }}
+                      title={`A becomes ${winner}; B becomes a copy you can keep tuning`}
                     >
-                      Use as baseline
+                      Tune further
                     </Button>
                     <Button variant="primary" icon="copy" onClick={() => void copyConfiguration()}>
-                      Copy
+                      Copy code
                     </Button>
                   </>
                 ) : (
@@ -655,19 +612,6 @@ export function Inspector({ host }: { host: InspectorHost }) {
                     </Button>
                   </>
                 )}
-              </div>
-            </div>
-          ) : null}
-
-          {view === "compare" && experiment ? (
-            <div className="mlui-foot">
-              <div className="mlui-hstack" style={{ padding: 12, gap: 8 }}>
-                <Button variant="secondary" block onClick={() => choose("A")}>
-                  {winner === "A" ? "A kept" : "Keep A"}
-                </Button>
-                <Button variant="primary" block onClick={() => choose("B")}>
-                  {winner === "B" ? "B chosen" : "Choose B"}
-                </Button>
               </div>
             </div>
           ) : null}

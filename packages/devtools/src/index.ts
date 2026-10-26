@@ -22,6 +22,7 @@ export { StageLayer, type StageLayerProps, type StageSlotSpec } from "./stage/St
 export { startPicker, hideElement, type PickerHandle, type PickerOptions } from "./dom/picker";
 export { recordInteraction, type CapturedMotion, type RecorderHandlers } from "./dom/recorder";
 export { cloneForStage } from "./dom/clone";
+export { defaultInteractionFor, type DefaultInteraction } from "./dom/defaultInteraction";
 export {
   breadcrumbFor,
   elementPath,
